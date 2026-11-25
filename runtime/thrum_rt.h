@@ -504,6 +504,7 @@ void thrum_install_builtins(TRuntime* rt);
 TCap* thrum_alloc_cap(TRuntime* rt, const char* name, TCapCleanup cleanup, void (*free_state)(void*), void* state);
 void thrum_cap_add_method(TRuntime* rt, TCap* cap, const char* mname, TBuiltinCtxPtr fn, int min_a, int max_a);
 TVal thrum_cap_gui_create(TRuntime* rt, int line, int col);
+TVal thrum_cap_net_create(TRuntime* rt, int line, int col);
 TVal thrum_get_cap(TRuntime* rt, const char* name, int argc, TVal* argv, int line, int col);
 TVal thrum_get_stdmod(TRuntime* rt, const char* name, int line, int col);
 void thrum_reg_loading(TRuntime* rt, const char* key);

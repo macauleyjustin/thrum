@@ -10,9 +10,9 @@ This document explains the major additions in **Thrum 0.2** compared to the init
 
 Thrum 0.2 transforms Thrum from an interpreted research language into a **self-hosted, natively compiled language** capable of producing standalone command-line tools, interactive terminal apps, and native macOS GUI software:
 
-1. **Self-Hosted Compiler (`thrumc`):** Complete compiler written in 3,803 lines of Thrum under [`selfhost/`](../selfhost/thrumc.thrum), generating portable C11 and verified to a byte-identical 3-stage fixed point.
-2. **Zero-Dependency C11 Native Runtime (`runtime/`):** Full mark-sweep garbage collector, topological reactive DAG solver, SI dimensional & Gaussian uncertainty arithmetic, UTF-8 text engine, MT19937 deterministic PRNG, and replay journaling in ~10,179 lines of C11/Objective-C.
-3. **Native macOS Desktop GUI Capability (`gui`):** Explicit `with gui:` capability backed by Cocoa/AppKit and CoreGraphics (`runtime/rt_gui_cocoa.m`), showcased by a full Klondike Solitaire game (`examples/solitaire.thrum`) and packagable as `ThrumSolitaire.app`.
+1. **Self-Hosted Compiler (`thrumc`):** Complete compiler written in pure Thrum under [`selfhost/`](../selfhost/thrumc.thrum), generating portable C11 and verified to a byte-identical 3-stage fixed point.
+2. **Zero-Dependency C11 Native Runtime (`runtime/`):** Full mark-sweep garbage collector, topological reactive DAG solver, SI dimensional & Gaussian uncertainty arithmetic, UTF-8 text engine, MT19937 deterministic PRNG, replay journaling, and native Cocoa/Foundation backends.
+3. **Native macOS Desktop GUI (`gui`) & Explicit HTTPS (`net`):** Explicit `with gui:` Cocoa/AppKit 2D canvas (shapes, clipping, font metrics, scroll wheel, clipboard) and `with net:` HTTPS client (`NSURLSession`), showcased by a full desktop web browser (`examples/browser.thrum` / `ThrumBrowser.app`) and Klondike Solitaire (`examples/solitaire.thrum` / `ThrumSolitaire.app`).
 4. **Records, Pattern Matching & Contracts:** Immutable product `record`s with dimensional field verification, copy-on-write field mutation, `match` destructuring, and `requires`/`ensures` function contracts.
 5. **18 Standard Modules:** 13 built-in modules (`math`, `const`, `stat`, `units`, `text`, `regex`, `json`, `csv`, `time`, `path`, `list`, `map`, `test`) plus 5 pure-Thrum modules under [`stdlib/`](../stdlib/physics.thrum) (`std.vec`, `std.physics`, `std.signal`, `std.finance`, `std.matrix`).
 
@@ -47,9 +47,9 @@ See [Records](reference.md#34-records) for full details.
 
 ---
 
-## New Capability: `gui`
+## New Capabilities: `gui` &amp; `net`
 
-Thrum 0.2 adds `gui` to the object-capability set (`io`, `clock`, `rand`, `fs`, `env`, `args`, `tty`, `proc`, `gui`). Native programs using `with gui:` link macOS `Cocoa.framework` via `runtime/rt_gui_cocoa.m`; CLI programs that omit `gui` link only `rt_gui_stub.o` and `libSystem` with zero AppKit overhead.
+Thrum 0.2 adds `gui` and `net` to the object-capability set (`io`, `clock`, `rand`, `fs`, `env`, `args`, `tty`, `proc`, `gui`, `net`). Native programs using `with gui:` or `with net:` link macOS `Cocoa.framework` (`runtime/rt_gui_cocoa.m`) and `Foundation.framework` (`runtime/rt_net_apple.m`); CLI programs that omit them link only the lightweight stubs (`rt_gui_stub.o`, `rt_net_stub.o`) with zero AppKit/Foundation overhead.
 
 An offscreen headless rendering mode (`THRUM_GUI_HEADLESS=1`) allows automated tests and CI pipelines to exercise frame rendering and `gui.screenshot()` PNG generation without an active desktop focus window.
 

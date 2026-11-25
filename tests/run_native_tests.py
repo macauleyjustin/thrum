@@ -120,9 +120,10 @@ def main():
 
     print(f"Native conformance: {passed}/{passed + failed} passed ({skipped} cli-only skipped)")
 
-    # Native self-tests + stdlib + headless GUI smoke check
+    # Native self-tests + stdlib + browser engine + headless GUI smoke checks
     r_self = subprocess.run([THRUMC, "test"], capture_output=True, text=True, cwd=ROOT, env=ENV)
     r_std = subprocess.run([THRUMC, "test", "tests/stdlib_test.thrum"], capture_output=True, text=True, cwd=ROOT, env=ENV)
+    r_br_unit = subprocess.run([THRUMC, "test", "tests/browser_test.thrum"], capture_output=True, text=True, cwd=ROOT, env=ENV)
     if r_self.returncode != 0:
         print("FAIL ./thrumc test:\n" + r_self.stdout + r_self.stderr)
         failed += 1
@@ -133,8 +134,14 @@ def main():
         failed += 1
     else:
         print("Native stdlib suite: passed")
+    if r_br_unit.returncode != 0:
+        print("FAIL ./thrumc test tests/browser_test.thrum:\n" + r_br_unit.stdout + r_br_unit.stderr)
+        failed += 1
+    else:
+        print("Native browser engine suite: 5/5 passed")
 
     sol_bin = os.path.join(ROOT, "solitaire")
+    br_bin = os.path.join(ROOT, "browser")
     if os.path.isfile(sol_bin) and sys.platform == "darwin":
         with tempfile.TemporaryDirectory() as tmp:
             shot = os.path.join(tmp, "gui.png")
@@ -148,7 +155,23 @@ def main():
                 print("FAIL solitaire headless GUI:", r_gui.returncode, r_gui.stderr)
                 failed += 1
             else:
-                print("Native headless GUI smoke test: passed")
+                print("Native headless Solitaire GUI smoke test: passed")
+
+    if os.path.isfile(br_bin) and sys.platform == "darwin":
+        with tempfile.TemporaryDirectory() as tmp:
+            for idx, target_url in enumerate(["about:home", "about:thrum", "file://README.md"]):
+                shot = os.path.join(tmp, f"br_{idx}.png")
+                r_br = subprocess.run(
+                    [br_bin, "--url", target_url, "--screenshot", shot],
+                    capture_output=True, text=True, cwd=ROOT,
+                    env={**ENV, "THRUM_GUI_HEADLESS": "1"},
+                )
+                hdr = open(shot, "rb").read(8) if os.path.exists(shot) else b""
+                if r_br.returncode != 0 or hdr != b"\x89PNG\r\n\x1a\n":
+                    print(f"FAIL browser headless GUI ({target_url}):", r_br.returncode, r_br.stderr)
+                    failed += 1
+            else:
+                print("Native headless Web Browser GUI smoke tests: passed")
 
     return 0 if failed == 0 else 1
 

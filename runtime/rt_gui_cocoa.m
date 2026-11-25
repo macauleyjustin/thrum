@@ -12,6 +12,8 @@ typedef enum {
     GCMD_CIRCLE,
     GCMD_LINE,
     GCMD_TEXT,
+    GCMD_CLIP,
+    GCMD_UNCLIP,
 } TGuiCmdKind;
 
 typedef struct {
@@ -21,6 +23,7 @@ typedef struct {
     double r, g, b, a;
     int align; /* 0:left 1:center 2:right 3:mid 4:lmid 5:rmid */
     bool bold;
+    bool mono;
     char* text;
 } TGuiCmd;
 
@@ -31,13 +34,15 @@ typedef struct {
 } TGuiCmdBuf;
 
 typedef struct {
-    int kind; /* 0:quit 1:down 2:up 3:move 4:drag 5:key 6:resize */
+    int kind; /* 0:quit 1:down 2:up 3:move 4:drag 5:key 6:resize 7:wheel */
     double x, y;
+    double dx, dy;
     int button;
     int clicks;
     bool cmd;
     bool shift;
     char* key;
+    char* typed;
 } TGuiEv;
 
 typedef struct TGuiState TGuiState;
@@ -102,8 +107,19 @@ static void push_ev(TGuiState* st, TGuiEv ev) {
 }
 
 static void events_clear(TGuiState* st) {
-    for (size_t i = 0; i < st->ev_len; i++) free(st->events[i].key);
+    for (size_t i = 0; i < st->ev_len; i++) {
+        free(st->events[i].key);
+        free(st->events[i].typed);
+    }
     st->ev_len = 0;
+}
+
+static NSFont* make_gui_font(double size, bool bold, bool mono) {
+    NSFontWeight w = bold ? NSFontWeightBold : NSFontWeightMedium;
+    if (mono) {
+        return [NSFont monospacedSystemFontOfSize:(CGFloat)size weight:(bold ? NSFontWeightBold : NSFontWeightRegular)];
+    }
+    return [NSFont systemFontOfSize:(CGFloat)size weight:w];
 }
 
 static double clamp255(double v) {
@@ -120,6 +136,7 @@ static void draw_disp_cmds(TGuiState* st, NSRect bounds) {
     if (!st) return;
     [mk_color(st->bg_r, st->bg_g, st->bg_b, 255.0) setFill];
     NSRectFill(bounds);
+    int clip_depth = 0;
 
     for (size_t i = 0; i < st->disp.len; i++) {
         TGuiCmd* c = &st->disp.items[i];
@@ -127,6 +144,17 @@ static void draw_disp_cmds(TGuiState* st, NSRect bounds) {
             case GCMD_CLEAR:
                 [mk_color(c->r, c->g, c->b, 255.0) setFill];
                 NSRectFill(bounds);
+                break;
+            case GCMD_CLIP:
+                [NSGraphicsContext saveGraphicsState];
+                NSRectClip(NSMakeRect(c->x, c->y, c->w, c->h));
+                clip_depth++;
+                break;
+            case GCMD_UNCLIP:
+                if (clip_depth > 0) {
+                    [NSGraphicsContext restoreGraphicsState];
+                    clip_depth--;
+                }
                 break;
             case GCMD_RECT:
                 [mk_color(c->r, c->g, c->b, c->a) setFill];
@@ -168,8 +196,7 @@ static void draw_disp_cmds(TGuiState* st, NSRect bounds) {
                 if (!c->text || !c->text[0]) break;
                 NSString* s = [NSString stringWithUTF8String:c->text];
                 if (!s) break;
-                NSFont* font = [NSFont systemFontOfSize:(CGFloat)c->rad
-                                                 weight:(c->bold ? NSFontWeightBold : NSFontWeightSemibold)];
+                NSFont* font = make_gui_font(c->rad, c->bold, c->mono);
                 NSColor* col = mk_color(c->r, c->g, c->b, c->a);
                 NSDictionary* attrs = [NSDictionary dictionaryWithObjectsAndKeys:
                     font, NSFontAttributeName,
@@ -185,6 +212,10 @@ static void draw_disp_cmds(TGuiState* st, NSRect bounds) {
                 break;
             }
         }
+    }
+    while (clip_depth > 0) {
+        [NSGraphicsContext restoreGraphicsState];
+        clip_depth--;
     }
 }
 
@@ -216,6 +247,24 @@ static void draw_disp_cmds(TGuiState* st, NSRect bounds) {
 - (void)mouseMoved:(NSEvent*)ev { [self pushMouse:ev kind:3 button:0]; }
 - (void)mouseDragged:(NSEvent*)ev { [self pushMouse:ev kind:4 button:1]; }
 
+- (void)scrollWheel:(NSEvent*)ev {
+    if (!_st) return;
+    NSPoint p = [self convertPoint:[ev locationInWindow] fromView:nil];
+    double dy = [ev scrollingDeltaY];
+    double dx = [ev scrollingDeltaX];
+    if (![ev hasPreciseScrollingDeltas]) {
+        dy *= 18.0;
+        dx *= 18.0;
+    }
+    TGuiEv ge = {0};
+    ge.kind = 7;
+    ge.x = p.x;
+    ge.y = p.y;
+    ge.dx = dx;
+    ge.dy = dy;
+    push_ev(_st, ge);
+}
+
 - (void)keyDown:(NSEvent*)ev {
     if (!_st) return;
     NSString* chars = [ev charactersIgnoringModifiers];
@@ -227,6 +276,10 @@ static void draw_disp_cmds(TGuiState* st, NSRect bounds) {
     else if (uc == NSDownArrowFunctionKey) name = "down";
     else if (uc == NSLeftArrowFunctionKey) name = "left";
     else if (uc == NSRightArrowFunctionKey) name = "right";
+    else if (uc == NSPageUpFunctionKey) name = "pageup";
+    else if (uc == NSPageDownFunctionKey) name = "pagedown";
+    else if (uc == NSHomeFunctionKey) name = "home";
+    else if (uc == NSEndFunctionKey) name = "end";
     else if (uc == '\r' || uc == '\n') name = "enter";
     else if (uc == ' ') name = "space";
     else if (uc == 0x1b) name = "esc";
@@ -246,6 +299,9 @@ static void draw_disp_cmds(TGuiState* st, NSRect bounds) {
     ge.key = strdup(name);
     ge.cmd = (mods & NSEventModifierFlagCommand) != 0;
     ge.shift = (mods & NSEventModifierFlagShift) != 0;
+    NSString* full = [ev characters];
+    const char* ts = (full && [full length] > 0) ? [full UTF8String] : NULL;
+    ge.typed = ts ? strdup(ts) : strdup("");
     push_ev(_st, ge);
 }
 @end
@@ -468,6 +524,7 @@ static TVal gui_poll(TRuntime* rt, void* ctx, int argc, TVal* argv, int line, in
         else if (e->kind == 4) kstr = "drag";
         else if (e->kind == 5) kstr = "key";
         else if (e->kind == 6) kstr = "resize";
+        else if (e->kind == 7) kstr = "wheel";
         thrum_map_set_cs(rt, m, "kind", thrum_cstr(rt, kstr));
         if (e->kind >= 1 && e->kind <= 4) {
             thrum_map_set_cs(rt, m, "x", thrum_num_dimless(e->x));
@@ -476,11 +533,17 @@ static TVal gui_poll(TRuntime* rt, void* ctx, int argc, TVal* argv, int line, in
             thrum_map_set_cs(rt, m, "clicks", thrum_num_dimless((double)e->clicks));
         } else if (e->kind == 5) {
             thrum_map_set_cs(rt, m, "key", thrum_cstr(rt, e->key ? e->key : ""));
+            thrum_map_set_cs(rt, m, "text", thrum_cstr(rt, e->typed ? e->typed : ""));
             thrum_map_set_cs(rt, m, "cmd", thrum_bool(e->cmd));
             thrum_map_set_cs(rt, m, "shift", thrum_bool(e->shift));
         } else if (e->kind == 6) {
             thrum_map_set_cs(rt, m, "width", thrum_num_dimless(e->x));
             thrum_map_set_cs(rt, m, "height", thrum_num_dimless(e->y));
+        } else if (e->kind == 7) {
+            thrum_map_set_cs(rt, m, "x", thrum_num_dimless(e->x));
+            thrum_map_set_cs(rt, m, "y", thrum_num_dimless(e->y));
+            thrum_map_set_cs(rt, m, "dx", thrum_num_dimless(e->dx));
+            thrum_map_set_cs(rt, m, "dy", thrum_num_dimless(e->dy));
         }
         thrum_list_push(rt, l, mp);
     }
@@ -628,7 +691,81 @@ static TVal gui_text(TRuntime* rt, void* ctx, int argc, TVal* argv, int line, in
     }
     c.bold = (argc > 8) ? thrum_truthy(argv[8]) : false;
     c.a = (argc > 9) ? thrum_need_num(rt, argv[9], line, col) : 255.0;
+    c.mono = (argc > 10) ? thrum_truthy(argv[10]) : false;
     cmd_buf_push(&st->staging, c);
+    return thrum_nil();
+}
+
+static TVal gui_clip(TRuntime* rt, void* ctx, int argc, TVal* argv, int line, int col) {
+    (void)argc;
+    TGuiState* st = (TGuiState*)ctx;
+    TGuiCmd c = {0};
+    c.kind = GCMD_CLIP;
+    c.x = thrum_need_num(rt, argv[0], line, col);
+    c.y = thrum_need_num(rt, argv[1], line, col);
+    c.w = thrum_need_num(rt, argv[2], line, col);
+    c.h = thrum_need_num(rt, argv[3], line, col);
+    cmd_buf_push(&st->staging, c);
+    return thrum_nil();
+}
+
+static TVal gui_unclip(TRuntime* rt, void* ctx, int argc, TVal* argv, int line, int col) {
+    (void)rt; (void)argc; (void)argv; (void)line; (void)col;
+    TGuiState* st = (TGuiState*)ctx;
+    TGuiCmd c = {0};
+    c.kind = GCMD_UNCLIP;
+    cmd_buf_push(&st->staging, c);
+    return thrum_nil();
+}
+
+static TVal gui_measure(TRuntime* rt, void* ctx, int argc, TVal* argv, int line, int col) {
+    (void)ctx;
+    const char* s = need_str(rt, argv[0], "gui.measure", line, col);
+    double size = thrum_need_num(rt, argv[1], line, col);
+    bool bold = (argc > 2) ? thrum_truthy(argv[2]) : false;
+    bool mono = (argc > 3) ? thrum_truthy(argv[3]) : false;
+    double w = 0.0, h = size * 1.25;
+    @autoreleasepool {
+        NSString* ns = [NSString stringWithUTF8String:s];
+        if (ns) {
+            NSFont* font = make_gui_font(size, bold, mono);
+            NSDictionary* attrs = [NSDictionary dictionaryWithObjectsAndKeys:font, NSFontAttributeName, nil];
+            NSSize sz = [ns sizeWithAttributes:attrs];
+            w = sz.width;
+            h = sz.height;
+        }
+    }
+    T_FRAME(rt);
+    T_VAR(rt, mp, thrum_map(rt));
+    TMap* m = (TMap*)mp.as.obj;
+    thrum_map_set_cs(rt, m, "width", thrum_num_dimless(w));
+    thrum_map_set_cs(rt, m, "height", thrum_num_dimless(h));
+    T_END_FRAME(rt);
+    return mp;
+}
+
+static TVal gui_clipboard(TRuntime* rt, void* ctx, int argc, TVal* argv, int line, int col) {
+    (void)ctx; (void)argc; (void)argv; (void)line; (void)col;
+    TVal out = thrum_cstr(rt, "");
+    @autoreleasepool {
+        NSString* s = [[NSPasteboard generalPasteboard] stringForType:NSPasteboardTypeString];
+        if (s) {
+            const char* u = [s UTF8String];
+            if (u) out = thrum_cstr(rt, u);
+        }
+    }
+    return out;
+}
+
+static TVal gui_set_clipboard(TRuntime* rt, void* ctx, int argc, TVal* argv, int line, int col) {
+    (void)ctx; (void)argc;
+    const char* s = need_str(rt, argv[0], "gui.set_clipboard", line, col);
+    @autoreleasepool {
+        NSPasteboard* pb = [NSPasteboard generalPasteboard];
+        [pb clearContents];
+        NSString* ns = [NSString stringWithUTF8String:s];
+        if (ns) [pb setString:ns forType:NSPasteboardTypeString];
+    }
     return thrum_nil();
 }
 
@@ -714,7 +851,12 @@ TVal thrum_cap_gui_create(TRuntime* rt, int line, int col) {
     thrum_cap_add_method(rt, c, "stroke_rect", gui_stroke_rect, 9, 10);
     thrum_cap_add_method(rt, c, "circle", gui_circle, 6, 7);
     thrum_cap_add_method(rt, c, "line", gui_line, 8, 9);
-    thrum_cap_add_method(rt, c, "text", gui_text, 7, 10);
+    thrum_cap_add_method(rt, c, "text", gui_text, 7, 11);
+    thrum_cap_add_method(rt, c, "clip", gui_clip, 4, 4);
+    thrum_cap_add_method(rt, c, "unclip", gui_unclip, 0, 0);
+    thrum_cap_add_method(rt, c, "measure", gui_measure, 2, 4);
+    thrum_cap_add_method(rt, c, "clipboard", gui_clipboard, 0, 0);
+    thrum_cap_add_method(rt, c, "set_clipboard", gui_set_clipboard, 1, 1);
     thrum_cap_add_method(rt, c, "commit", gui_commit, 0, 0);
     thrum_cap_add_method(rt, c, "screenshot", gui_screenshot, 1, 1);
     return thrum_obj((TObj*)c);

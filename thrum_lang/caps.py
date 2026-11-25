@@ -8,6 +8,8 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 
 try:
     import termios
@@ -568,12 +570,102 @@ def cap_gui(I, a, s):
     raise ThrumError("gui capability requires compiled native binary (./thrumc build ...)", s)
 
 
+def cap_net(I, a, s):
+    def _do_req(method, url, body=None, headers=None, call_site=None):
+        if not isinstance(url, str) or not (url.startswith("http://") or url.startswith("https://")):
+            return {
+                "ok": False,
+                "status": mkq(0),
+                "url": url if isinstance(url, str) else "",
+                "content_type": "",
+                "headers": {},
+                "body": "",
+                "error": "only http:// and https:// URLs are supported",
+            }
+        req_hdrs = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Apple Silicon Mac OS X) ThrumBrowser/0.2",
+            "Accept": "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.8",
+        }
+        if isinstance(headers, dict):
+            for k, v in headers.items():
+                if isinstance(k, str) and isinstance(v, str):
+                    req_hdrs[k] = v
+        data = body.encode("utf-8") if isinstance(body, str) else None
+        req = urllib.request.Request(url, data=data, headers=req_hdrs, method=method)
+
+        def _do():
+            try:
+                with urllib.request.urlopen(req, timeout=12.0) as resp:
+                    raw = resp.read()
+                    try:
+                        text = raw.decode("utf-8")
+                    except UnicodeDecodeError:
+                        text = raw.decode("latin-1", "replace")
+                    hdrs = {str(k).lower(): str(v) for k, v in resp.headers.items()}
+                    return {
+                        "ok": 200 <= resp.status < 400,
+                        "status": int(resp.status),
+                        "url": resp.geturl(),
+                        "content_type": resp.headers.get_content_type(),
+                        "headers": hdrs,
+                        "body": text,
+                        "error": "",
+                    }
+            except urllib.error.HTTPError as he:
+                raw = he.read()
+                text = raw.decode("utf-8", "replace")
+                hdrs = {str(k).lower(): str(v) for k, v in he.headers.items()} if he.headers else {}
+                return {
+                    "ok": False,
+                    "status": int(he.code),
+                    "url": he.geturl() or url,
+                    "content_type": he.headers.get_content_type() if he.headers else "",
+                    "headers": hdrs,
+                    "body": text,
+                    "error": str(he),
+                }
+            except Exception as ex:
+                return {
+                    "ok": False,
+                    "status": 0,
+                    "url": url,
+                    "content_type": "",
+                    "headers": {},
+                    "body": "",
+                    "error": str(ex),
+                }
+
+        raw = I.journal.get("net." + method.lower(), url, _do)
+        return {
+            "ok": raw["ok"],
+            "status": mkq(int(raw["status"])),
+            "url": raw["url"],
+            "content_type": raw["content_type"],
+            "headers": raw["headers"],
+            "body": raw["body"],
+            "error": raw["error"],
+        }
+
+    def get_req(I, a, s):
+        if not isinstance(a[0], str):
+            raise ThrumError("net.get needs text url", s)
+        return _do_req("GET", a[0], None, a[1] if len(a) > 1 else None, s)
+
+    def post_req(I, a, s):
+        if not isinstance(a[0], str) or not isinstance(a[1], str):
+            raise ThrumError("net.post needs text url and body", s)
+        return _do_req("POST", a[0], a[1], a[2] if len(a) > 2 else None, s)
+
+    return _mkcap("net", {"get": ((1, 2), get_req), "post": ((2, 3), post_req)})
+
+
 CAPS = {
     "io": cap_io,
     "clock": cap_clock,
     "rand": cap_rand,
     "fs": cap_fs,
     "gui": cap_gui,
+    "net": cap_net,
     "env": cap_env,
     "args": cap_args,
     "tty": cap_tty,

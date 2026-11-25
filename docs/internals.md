@@ -30,10 +30,10 @@ Compilation & execution pipeline in `thrumc`:
        v
   [ codegen_c.thrum ]   Lowers functions/closures, records, reactive thunks, modules -> C11
        |
-       +--> emits `/* THRUM_USE_GUI */` on line 1 if `with gui:` appears anywhere
+       +--> emits `/* THRUM_CAPS: ... */` on line 1 when `gui` or `net` is requested
        |
        v
-  [ host cc / clang ]   Links C11 object + `runtime/libthrumrt.a` + (`rt_gui_cocoa.o -framework Cocoa` or `rt_gui_stub.o`)
+  [ host cc / clang ]   Links C11 object + `runtime/libthrumrt.a` + Cocoa/Foundation (`gui`/`net`) or stubs
        |
        v
   Standalone Mach-O / native executable
@@ -102,11 +102,12 @@ Every value in Thrum is a stack-passed 32-byte value struct `TVal`:
 
 ---
 
-## 6. Capabilities, Journaling, and Cocoa GUI (`runtime/rt_caps.c`, `runtime/rt_gui_cocoa.m`)
+## 6. Capabilities, Journaling, Networking & Cocoa GUI (`runtime/rt_caps.c`, `rt_gui_cocoa.m`, `rt_net_apple.m`)
 
-- **Deterministic Journal:** Every capability input read (`rand.*`, `clock.now/mono`, `fs.read`, `env.get`, `args.all`, `io.ask`, `tty.poll_key/size`, `proc.run`) routes through `thrum_journal_get(rt, kind, key, produce, ctx)`. In `--journal` mode, serialized `$q` JSON records `(kind, key, value)`; in `--replay` mode, saved values replay in sequence and verify both capability key/kind parity and identical output streams (`io.say`, `tty.write`, etc.).
+- **Deterministic Journal:** Every capability input read (`rand.*`, `clock.now/mono`, `fs.read`, `env.get`, `args.all`, `io.ask`, `tty.poll_key/size`, `proc.run`, `net.get/post`) routes through `thrum_journal_get(rt, kind, key, produce, ctx)`. In `--journal` mode, serialized `$q` JSON records `(kind, key, value)`; in `--replay` mode, saved values replay in sequence and verify both capability key/kind parity and identical output streams (`io.say`, `tty.write`, etc.).
 - **MT19937 Parity:** `cap_rand` embeds a C11 Mersenne Twister (`init_by_array` seeding + `mt_randbelow` bitmask rejection matching Python's `random.Random` bit-for-bit).
-- **Native Cocoa / AppKit 2D Engine:** `runtime/rt_gui_cocoa.m` exposes `ThrumGuiView` (overriding `isFlipped` to `YES` for top-left coordinates matching mouse events), buffers drawing commands in staging/display `TGuiCmdBuf` arrays inside `gui.begin()`...`gui.commit()`, routes `Cmd+Q`/close cleanly through `ThrumWinDelegate` without bypassing `thrum_finish()` cleanup, and renders 2x Retina PNGs via offscreen `NSBitmapImageRep` (used both interactively and under `THRUM_GUI_HEADLESS=1`).
+- **Native Cocoa / AppKit 2D Engine:** `runtime/rt_gui_cocoa.m` exposes `ThrumGuiView` (overriding `isFlipped` to `YES` for top-left coordinates matching mouse events), buffers drawing commands (`rect`, `round_rect`, `stroke_rect`, `circle`, `line`, `text` with proportional/monospace fonts, `clip`/`unclip` graphics-state stack) in staging/display `TGuiCmdBuf` arrays inside `gui.begin()`...`gui.commit()`, dispatches mouse, keyboard, and `scrollWheel:` events (`wheel`), provides `CoreText`/AppKit string width metrics via `gui.measure()` and pasteboard access via `gui.clipboard()`/`set_clipboard()`, routes `Cmd+Q`/close cleanly through `ThrumWinDelegate`, and renders 2x Retina PNGs via offscreen `NSBitmapImageRep` (used both interactively and under `THRUM_GUI_HEADLESS=1`).
+- **Explicit HTTP/HTTPS Client:** `runtime/rt_net_apple.m` backs `with net:` via ephemeral `NSURLSession` requests (enforcing explicit `http://`/`https://` schemes, returning structured status/headers/body/error records, and linking only when `net` is requested while CLI binaries keep the lightweight `rt_net_stub.o`).
 
 ---
 

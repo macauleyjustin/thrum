@@ -1,10 +1,12 @@
 # Compiled binaries & build intermediates
 runtime/build/
 runtime/libthrumrt.a
-thrumc
-tetris
-solitaire
-ThrumSolitaire.app/
+/thrumc
+/tetris
+/solitaire
+/browser
+/ThrumSolitaire.app/
+/ThrumBrowser.app/
 *.thrumc.c
 .thrumc_run_*
 

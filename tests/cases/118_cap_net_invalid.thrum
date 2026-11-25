@@ -1,0 +1,5 @@
+with net, io:
+    let r = net.get("ftp://example.com/file.txt")
+    io.say(r.ok)
+    io.say(r.status)
+    io.say(r.error)

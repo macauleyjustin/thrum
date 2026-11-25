@@ -19,8 +19,8 @@ Thrum is a reactive, dimension-checked, explainable, capability-sandboxed progra
 - **Physical quantities as the single numeric type (`72 ± 0.5 kg`, `as ft`):** Every number carries an exact 7-base SI dimension vector `(m, kg, s, A, K, mol, cd)` and first-order Gaussian uncertainty `σ` propagated through arithmetic, powers, and math functions.
 - **Explainability & counterfactuals (`why`, `budget`, `whatif`):** Inspect live dependency derivation trees, rank uncertainty contributions by input, and evaluate isolated hypotheticals without mutating program state.
 - **Immutable values & copy-on-write reactivity:** Typed `record`s, lists, and maps use value semantics with pattern matching (`match`/`case`), triggering reactive updates cleanly on indexed or field assignment (`p.x = 5 m`, `xs[0] = 10`).
-- **Capability safety & deterministic replay (`with`, `--journal`, `--replay`):** Pure expressions and relations have **no ambient authority**; external effects (`io`, `fs`, `clock`, `rand`, `env`, `args`, `tty`, `proc`, `gui`) require explicit capabilities that can be journaled and deterministically replayed.
-- **Self-hosted native binaries + macOS Desktop GUI:** Compile `.thrum` programs—including interactive terminal games (`examples/tetris.thrum`) and native desktop Cocoa GUI apps (`examples/solitaire.thrum`)—directly to standalone executables with zero Python runtime dependency.
+- **Capability safety & deterministic replay (`with`, `--journal`, `--replay`):** Pure expressions and relations have **no ambient authority**; external effects (`io`, `fs`, `clock`, `rand`, `env`, `args`, `tty`, `proc`, `gui`, `net`) require explicit capabilities that can be journaled and deterministically replayed.
+- **Self-hosted native binaries + macOS Desktop GUI:** Compile `.thrum` programs—including a pure-Thrum desktop **web browser** (`examples/browser.thrum`), Klondike Solitaire (`examples/solitaire.thrum`), and ANSI terminal Tetris (`examples/tetris.thrum`)—directly to standalone executables with zero Python runtime dependency.
 
 ---
 
@@ -54,9 +54,9 @@ with io:
 ### Build Standalone Toolchain & Sample Apps (macOS / C11)
 
 ```bash
-make                # builds runtime/libthrumrt.a, ./thrumc, ./tetris, ./solitaire
+make                # builds runtime/libthrumrt.a, ./thrumc, ./tetris, ./solitaire, ./browser
 make bootstrap      # verifies 3-stage self-hosting fixed point (Stage 1 == Stage 2)
-make app            # packages ./ThrumSolitaire.app with AppIcon.icns
+make app            # packages ./ThrumSolitaire.app and ./ThrumBrowser.app with AppIcon.icns
 ```
 
 Run the compiled apps and compiler:
@@ -64,9 +64,10 @@ Run the compiled apps and compiler:
 ```bash
 ./thrumc version
 ./thrumc check examples/bmi.thrum
-./thrumc build examples/solitaire.thrum -o solitaire
+./thrumc build examples/browser.thrum -o browser
 ./thrumc run examples/lab_pipeline.thrum
 
+./browser                   # launches native Cocoa GUI Thrum Web Browser
 ./solitaire                 # launches native Cocoa GUI Klondike Solitaire
 ./tetris                    # launches interactive terminal ANSI Tetris
 ./tetris --demo 25 --plain  # AI demo run
@@ -75,9 +76,10 @@ Run the compiled apps and compiler:
 ### Run Conformance & Self-Test Suites
 
 ```bash
-./thrumc test                       # 16 bundled native language self-tests
+./thrumc test                        # bundled native language self-tests
 ./thrumc test tests/stdlib_test.thrum
-make test                           # native conformance, stdlib, headless GUI, & Python reference suite
+./thrumc test tests/browser_test.thrum
+make test                            # native conformance, stdlib, browser, headless GUI & Python reference suites
 ```
 
 ### Optional Pure-Python Reference Toolchain
@@ -112,10 +114,10 @@ Thrum follows Python Software Foundation-style documentation organized by audien
 ## Project Layout
 
 - **[`selfhost/`](selfhost/thrumc.thrum)** — Self-hosted Thrum compiler written in Thrum (`lexer`, `parser`, `checker`, `units`, `codegen_c`, `util`, `thrumc`)
-- **[`runtime/`](runtime/thrum_rt.h)** — Zero-dependency C11 runtime + mark-sweep GC + reactive graph engine + native macOS Cocoa backend (`rt_gui_cocoa.m`)
+- **[`runtime/`](runtime/thrum_rt.h)** — Zero-dependency C11 runtime + mark-sweep GC + reactive graph engine + native macOS Cocoa GUI & HTTPS backends (`rt_gui_cocoa.m`, `rt_net_apple.m`)
 - **[`stdlib/`](stdlib/physics.thrum)** — Pure-Thrum domain modules (`std.vec`, `std.physics`, `std.signal`, `std.finance`, `std.matrix`)
-- **[`examples/`](examples/solitaire.thrum)** — Showcase programs including Cocoa GUI Klondike Solitaire, terminal Tetris, N-body simulation, and thermostat fixpoint
-- **[`tests/`](tests/run_native_tests.py)** — 117 conformance tests, native & Python test runners, and stdlib test suite
+- **[`examples/`](examples/browser.thrum)** — Showcase programs including the desktop Web Browser (`examples/browser.thrum`), Cocoa GUI Klondike Solitaire, terminal Tetris, N-body simulation, and thermostat fixpoint
+- **[`tests/`](tests/run_native_tests.py)** — Conformance cases, native & Python test runners, stdlib tests, and browser engine tests
 - **[`thrum_lang/`](thrum_lang/cli.py)** — Pure Python 3.9+ reference interpreter and developer tooling (`thrum.py`)
 - **[`docs/`](docs/index.md)** — Full PSF-style language documentation book
 - **[`assets/`](assets/thrum_logo.png)** — Thrum emblem logo assets

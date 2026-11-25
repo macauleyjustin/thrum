@@ -20,10 +20,10 @@ pin BUILTIN_SET = {
     "fmt": true, "fail": true,
 }
 
-pin CAPS_LIST = ["args", "clock", "env", "fs", "gui", "io", "proc", "rand", "tty"]
+pin CAPS_LIST = ["args", "clock", "env", "fs", "gui", "io", "net", "proc", "rand", "tty"]
 pin CAPS_SET = {
     "io": true, "clock": true, "rand": true, "fs": true,
-    "gui": true, "env": true, "args": true, "tty": true, "proc": true,
+    "gui": true, "net": true, "env": true, "args": true, "tty": true, "proc": true,
 }
 
 pin BUILTIN_MODS_LIST = [

@@ -2174,7 +2174,8 @@ TVal thrum_get_cap(TRuntime* rt, const char* name, int argc, TVal* argv, int lin
     if (strcmp(name, "tty") == 0) return thrum_obj((TObj*)mk_cap_tty(rt));
     if (strcmp(name, "proc") == 0) return thrum_obj((TObj*)mk_cap_proc(rt));
     if (strcmp(name, "gui") == 0) return thrum_cap_gui_create(rt, line, col);
+    if (strcmp(name, "net") == 0) return thrum_cap_net_create(rt, line, col);
     char msg[160];
     snprintf(msg, sizeof(msg), "unknown capability '%s'", name);
-    thrum_error(rt, line, col, msg, "available: args, clock, env, fs, gui, io, proc, rand, tty");
+    thrum_error(rt, line, col, msg, "available: args, clock, env, fs, gui, io, net, proc, rand, tty");
 }

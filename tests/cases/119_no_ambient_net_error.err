@@ -1,0 +1,3 @@
+119_no_ambient_net_error.thrum:1:9: error: undefined name 'net'
+      1 | let r = net.get("https://example.com")
+        |         ^

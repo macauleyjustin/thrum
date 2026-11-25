@@ -1,0 +1,35 @@
+# Linear-time 3-tier chunked append buffer for browser parsing & layout.
+
+fn buf_new():
+    return {a: [], b: [], c: []}
+
+fn buf_push(buf, item):
+    var c = push(buf.c, item)
+    if len(c) < 32:
+        return {a: buf.a, b: buf.b, c: c}
+    var b = push(buf.b, c)
+    if len(b) < 32:
+        return {a: buf.a, b: b, c: []}
+    return {a: push(buf.a, b), b: [], c: []}
+
+fn buf_list(buf):
+    var out = []
+    for blk in buf.a:
+        for ch in blk:
+            out = concat(out, ch)
+    for ch2 in buf.b:
+        out = concat(out, ch2)
+    return concat(out, buf.c)
+
+fn buf_join(buf, sep = ""):
+    var mid = []
+    for blk in buf.a:
+        var sub = []
+        for ch in blk:
+            sub = push(sub, join(sep, ch))
+        mid = push(mid, join(sep, sub))
+    for ch2 in buf.b:
+        mid = push(mid, join(sep, ch2))
+    if len(buf.c) > 0:
+        mid = push(mid, join(sep, buf.c))
+    return join(sep, mid)

@@ -132,7 +132,8 @@ POSIX Extended Regular Expressions (`\d`, `\w`, `\s` supported cleanly):
 | `args` | `all()`, `get(i[, def])`, `len()` | CLI program arguments |
 | `tty` | `is_tty()`, `enter_raw()`, `exit_raw()`, `hide_cursor()`, `show_cursor()`, `clear()`, `write(...)`, `size()`, `poll_key([dt])` | Raw non-blocking terminal TUI with automatic restore cleanup |
 | `proc` | `run(argv[, cwd])`, `exe()`, `cwd()`, `exit([code])` | Subprocess invocation returning `{code, stdout, stderr}` |
-| `gui` | `open(title, w, h)`, `is_open()`, `close()`, `size()`, `poll()`, `wait(ms)`, `begin()`, `clear(r,g,b)`, `rect(...)`, `round_rect(...)`, `stroke_rect(...)`, `circle(...)`, `line(...)`, `text(...)`, `commit()`, `screenshot(path)` | Native macOS Cocoa/AppKit 2D canvas window (`rt_gui_cocoa.m`) |
+| `gui` | `open(title, w, h)`, `is_open()`, `close()`, `size()`, `poll()`, `wait(ms)`, `begin()`, `clear(r,g,b)`, `rect(...)`, `round_rect(...)`, `stroke_rect(...)`, `circle(...)`, `line(...)`, `text(..., [align, [bold, [a, [mono]]]])`, `clip(x,y,w,h)`, `unclip()`, `measure(txt, sz[, bold[, mono]])`, `clipboard()`, `set_clipboard(s)`, `commit()`, `screenshot(path)` | Native macOS Cocoa/AppKit 2D canvas window (`rt_gui_cocoa.m`) with clipping, monospace metrics, wheel scroll & clipboard |
+| `net` | `get(url[, headers])`, `post(url, body[, headers])` | Explicit `http://` and `https://` client (`NSURLSession` / `rt_net_apple.m`), returning `{ok, status, url, content_type, headers, body, error}` with replay journaling |
 
 ---
 

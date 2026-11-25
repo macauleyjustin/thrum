@@ -1,0 +1,85 @@
+# Built-in start page, Thrum showcase page, and plain-text wrapper for Thrum Browser.
+
+use text
+
+fn escape_html(s) -> text:
+    var r = replace(s, "&", "&amp;")
+    r = replace(r, "<", "&lt;")
+    r = replace(r, ">", "&gt;")
+    return r
+
+fn text_to_html(title, txt) -> text:
+    return "<html><head><title>" + escape_html(title) + "</title></head><body><h1>" + escape_html(title) + "</h1><pre>" + escape_html(txt) + "</pre></body></html>"
+
+fn error_page(url, status, err_msg) -> text:
+    var det = err_msg
+    if status > 0:
+        det = "HTTP Status {status}: {err_msg}"
+    return (
+        "<html><head><title>Cannot Load Page</title></head><body>" +
+        "<h1>Could Not Load URL</h1>" +
+        "<p><b>Address:</b> <code>" + escape_html(url) + "</code></p>" +
+        "<blockquote><p>" + escape_html(det) + "</p></blockquote>" +
+        "<hr>" +
+        "<p>Try returning to <a href=\"about:home\">about:home</a> or <a href=\"about:thrum\">about:thrum</a>.</p>" +
+        "</body></html>"
+    )
+
+fn about_page(url) -> text:
+    if url == "about:blank":
+        return "<html><head><title>New Tab</title></head><body><p></p></body></html>"
+
+    if url == "about:thrum":
+        return (
+            "<html><head><title>Thrum Browser Engine — Rendering Demo</title></head><body>" +
+            "<h1>Thrum Native Web Browser Engine</h1>" +
+            "<p>Every component of this browser — <b>URL resolution</b>, <b>HTML5-style tokenization</b>, <b>entity decoding</b>, <b>box/table layout</b>, and <b>60 FPS viewport scrolling</b> — is written in pure <b>Thrum</b> and compiled to native macOS code via <code>thrumc</code>.</p>" +
+            "<blockquote><p>Pure code cannot perform network I/O or draw windows unless granted explicit capabilities: <code>with gui, net, clock, fs, args:</code>.</p></blockquote>" +
+            "<h2>Capabilities in Action</h2>" +
+            "<ul>" +
+            "<li><b>TLS 1.3 / HTTPS Fetching:</b> Powered by explicit <code>net.get(url)</code> with redirect following and deterministic replay journaling.</li>" +
+            "<li><b>Pixel-Accurate Text Layout:</b> Uses CoreText/AppKit metrics via <code>gui.measure(...)</code> and clipped scrolling regions via <code>gui.clip(...)</code>.</li>" +
+            "<li><b>Live Reactive Chrome:</b> Scroll percentage, page link counts, word counts, and window titles recompute via live <code>let</code> relations.</li>" +
+            "</ul>" +
+            "<h2>Supported HTML Elements</h2>" +
+            "<table>" +
+            "<tr><th>Category</th><th>Tags Rendered</th><th>Behavior</th></tr>" +
+            "<tr><td>Headings &amp; Flow</td><td>h1..h6, p, div, br, hr</td><td>Scaled typography &amp; word wrapping</td></tr>" +
+            "<tr><td>Links &amp; Media</td><td>a[href], img[alt]</td><td>Clickable wrapped hitboxes &amp; image boxes</td></tr>" +
+            "<tr><td>Lists &amp; Quotes</td><td>ul, ol, li, blockquote</td><td>Nested bullets, numbers &amp; accent bars</td></tr>" +
+            "<tr><td>Code &amp; Tables</td><td>pre, code, table, tr, td, th</td><td>Monospace blocks &amp; multi-column tables</td></tr>" +
+            "</table>" +
+            "<h2>Sample Thrum Source</h2>" +
+            "<pre>var temp = 295 ± 0.5 K\nlet power = temp^4 * 5.67e-8 W/(m^2*K^4)\n\nwith io:\n    io.say(\"Blackbody flux:\", round(power, 1))</pre>" +
+            "<p>Explore more: <a href=\"about:home\">Back to Start Page</a> &bull; <a href=\"https://example.com\">Example Domain (HTTPS)</a> &bull; <a href=\"https://news.ycombinator.com\">Hacker News</a></p>" +
+            "</body></html>"
+        )
+
+    # Default: about:home
+    return (
+        "<html><head><title>Thrum Browser — Start Page</title></head><body>" +
+        "<h1>Thrum Web Browser</h1>" +
+        "<p>A native desktop web browser written in the <b>Thrum</b> programming language. Enter any <code>https://</code> URL, local file path, or search query in the address bar above.</p>" +
+        "<hr>" +
+        "<h2>Quick Launch Bookmarks</h2>" +
+        "<table>" +
+        "<tr><th>Site</th><th>Description</th><th>Link</th></tr>" +
+        "<tr><td><b>Thrum Overview</b></td><td>Built-in engine showcase &amp; rendering test</td><td><a href=\"about:thrum\">about:thrum</a></td></tr>" +
+        "<tr><td><b>Example Domain</b></td><td>IANA live HTTPS test page</td><td><a href=\"https://example.com\">https://example.com</a></td></tr>" +
+        "<tr><td><b>Hacker News</b></td><td>Live tech links table layout test</td><td><a href=\"https://news.ycombinator.com\">https://news.ycombinator.com</a></td></tr>" +
+        "<tr><td><b>NPR Text News</b></td><td>Clean readable journalism over HTTPS</td><td><a href=\"https://text.npr.org\">https://text.npr.org</a></td></tr>" +
+        "<tr><td><b>DuckDuckGo Lite</b></td><td>Lightweight web search over HTTPS</td><td><a href=\"https://lite.duckduckgo.com/lite/\">https://lite.duckduckgo.com/lite/</a></td></tr>" +
+        "<tr><td><b>Wikipedia</b></td><td>Encyclopedia article: Compiler</td><td><a href=\"https://en.wikipedia.org/wiki/Compiler\">https://en.wikipedia.org/wiki/Compiler</a></td></tr>" +
+        "<tr><td><b>Thrum GitHub</b></td><td>Source repository on GitHub</td><td><a href=\"https://github.com/macauleyjustin/thrum\">macauleyjustin/thrum</a></td></tr>" +
+        "<tr><td><b>Local README</b></td><td>Browse local project file via file://</td><td><a href=\"file://README.md\">file://README.md</a></td></tr>" +
+        "</table>" +
+        "<h3>Keyboard &amp; Navigation Shortcuts</h3>" +
+        "<ul>" +
+        "<li><b>Cmd+L</b> &mdash; Focus address bar &nbsp; &bull; &nbsp; <b>Enter</b> &mdash; Navigate / Search</li>" +
+        "<li><b>Cmd+T / Cmd+W</b> &mdash; Open new tab / Close current tab</li>" +
+        "<li><b>Cmd+R / Cmd+V</b> &mdash; Reload page / Paste URL into address bar</li>" +
+        "<li><b>Scroll Wheel / Up / Down / PageUp / PageDown / Space</b> &mdash; Scroll page cleanly</li>" +
+        "<li><b>Source Button</b> &mdash; Toggle HTTP headers, extracted links, and raw HTML inspector</li>" +
+        "</ul>" +
+        "</body></html>"
+    )

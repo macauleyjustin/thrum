@@ -148,14 +148,15 @@ When running via Python 3.9+, `thrum.py` provides additional interactive and ins
 
 | Target | Action |
 | :--- | :--- |
-| `make` / `make all` | Build C/Cocoa runtime (`libthrumrt.a`, `rt_gui_stub.o`, `rt_gui_cocoa.o`), `./thrumc`, `./tetris`, and `./solitaire`. |
-| `make runtime` | Compile the C11 runtime archive and GUI backends with `-Wall -Wextra -Werror`. |
+| `make` / `make all` | Build C/Cocoa runtime (`libthrumrt.a`, `rt_gui_*`, `rt_net_*`), `./thrumc`, `./tetris`, `./solitaire`, and `./browser`. |
+| `make runtime` | Compile the C11 runtime archive, GUI backends, and `net` backends with `-Wall -Wextra -Werror`. |
 | `make thrumc` | Compile Stage 1 & Stage 2 `./thrumc` from `selfhost/*.thrum`. |
 | `make bootstrap` | Emit Stage 2 and Stage 3 C outputs and verify `diff -u` is byte-identical. |
 | `make tetris` | Compile standalone `./tetris` binary. |
 | `make solitaire` | Compile standalone `./solitaire` binary with Cocoa framework. |
-| `make app` | Package `ThrumSolitaire.app` with `Info.plist` and `AppIcon.icns` from `assets/thrum_logo.png`. |
-| `make native-test` | Run `tests/run_native_tests.py` (conformance cases, native self-tests, stdlib suite, headless GUI screenshot test). |
+| `make browser` | Compile standalone `./browser` web browser binary with Cocoa + Foundation HTTPS networking. |
+| `make app` | Package `ThrumSolitaire.app` and `ThrumBrowser.app` with `Info.plist` and `AppIcon.icns` from `assets/thrum_logo.png`. |
+| `make native-test` | Run `tests/run_native_tests.py` (conformance cases, native self-tests, stdlib & browser suites, headless GUI/browser checks). |
 | `make test` | Run `native-test` plus all Python reference test suites. |
 | `make clean` | Remove build artifacts, libraries, binaries, and `.app` bundles. |
 

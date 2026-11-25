@@ -103,7 +103,36 @@ fn compile_to_c(in_file, cwd, home, fs_cap, strict = false):
     let src = fs_cap.read(af)
     return compile_src_to_c(src, af, in_file, home, fs_cap, strict)
 
-fn compile_to_bin(c_path, out_bin, home, fs_cap, proc_cap, needs_gui = false):
+fn detect_caps(c_code):
+    let hdr = slice(c_code, 0, min([64, len(c_code)]))
+    let has_hdr = starts(hdr, "/* THRUM_CAPS:")
+    return {
+        gui: has_hdr and (" gui " in hdr),
+        net: has_hdr and (" net " in hdr),
+    }
+
+fn add_opt_backend(cmd_in, enabled, obj_nm, m_nm, stub_o_nm, stub_c_nm, fw, rt_dir, fs_cap):
+    var cmd = cmd_in
+    if enabled:
+        let pre_o = path.join(rt_dir, "build", obj_nm)
+        let alt_m = path.join(rt_dir, m_nm)
+        if fs_cap.is_file(pre_o):
+            cmd = push(cmd, pre_o)
+        elif fs_cap.is_file(alt_m):
+            cmd = push(cmd, alt_m)
+        else:
+            cmd = push(cmd, path.join(rt_dir, stub_c_nm))
+        cmd = push(cmd, "-framework")
+        cmd = push(cmd, fw)
+    else:
+        let stub_o = path.join(rt_dir, "build", stub_o_nm)
+        if fs_cap.is_file(stub_o):
+            cmd = push(cmd, stub_o)
+        else:
+            cmd = push(cmd, path.join(rt_dir, stub_c_nm))
+    return cmd
+
+fn compile_to_bin(c_path, out_bin, home, fs_cap, proc_cap, needs_gui = false, needs_net = false):
     let rt_dir = path.join(home, "runtime")
     let lib_a = path.join(rt_dir, "libthrumrt.a")
     var cmd = ["cc", "-std=c11", "-O2", "-I" + rt_dir, c_path]
@@ -112,23 +141,8 @@ fn compile_to_bin(c_path, out_bin, home, fs_cap, proc_cap, needs_gui = false):
     else:
         for f in RT_FILES:
             cmd = push(cmd, path.join(rt_dir, f))
-    if needs_gui:
-        let cocoa_o = path.join(rt_dir, "build", "rt_gui_cocoa.o")
-        let cocoa_m = path.join(rt_dir, "rt_gui_cocoa.m")
-        if fs_cap.is_file(cocoa_o):
-            cmd = push(cmd, cocoa_o)
-        elif fs_cap.is_file(cocoa_m):
-            cmd = push(cmd, cocoa_m)
-        else:
-            cmd = push(cmd, path.join(rt_dir, "rt_gui_stub.c"))
-        cmd = push(cmd, "-framework")
-        cmd = push(cmd, "Cocoa")
-    else:
-        let stub_o = path.join(rt_dir, "build", "rt_gui_stub.o")
-        if fs_cap.is_file(stub_o):
-            cmd = push(cmd, stub_o)
-        else:
-            cmd = push(cmd, path.join(rt_dir, "rt_gui_stub.c"))
+    cmd = add_opt_backend(cmd, needs_gui, "rt_gui_cocoa.o", "rt_gui_cocoa.m", "rt_gui_stub.o", "rt_gui_stub.c", "Cocoa", rt_dir, fs_cap)
+    cmd = add_opt_backend(cmd, needs_net, "rt_net_apple.o", "rt_net_apple.m", "rt_net_stub.o", "rt_net_stub.c", "Foundation", rt_dir, fs_cap)
     cmd = push(cmd, "-lm")
     cmd = push(cmd, "-o")
     cmd = push(cmd, out_bin)
@@ -264,9 +278,9 @@ fn run_compiled_src(src, af, disp_name, run_args, tmp_dir, home, fs_cap, proc_ca
     let tmp_bin = path.join(tmp_dir, stem)
     try:
         let c_code = compile_src_to_c(src, af, disp_name, home, fs_cap, strict)
-        let needs_gui = starts(c_code, "/* THRUM_USE_GUI */")
+        let dc = detect_caps(c_code)
         fs_cap.write(tmp_c, c_code)
-        let cr = compile_to_bin(tmp_c, tmp_bin, home, fs_cap, proc_cap, needs_gui)
+        let cr = compile_to_bin(tmp_c, tmp_bin, home, fs_cap, proc_cap, dc.gui, dc.net)
         if fs_cap.exists(tmp_c):
             fs_cap.remove(tmp_c)
         if cr.code != 0:
@@ -499,9 +513,9 @@ fn main():
             let tmp_c = out_abs + ".thrumc.c"
             try:
                 let c_code = compile_to_c(f, cwd, home, fs, strict)
-                let needs_gui = starts(c_code, "/* THRUM_USE_GUI */")
+                let dc = detect_caps(c_code)
                 fs.write(tmp_c, c_code)
-                let cr = compile_to_bin(tmp_c, out_abs, home, fs, proc, needs_gui)
+                let cr = compile_to_bin(tmp_c, out_abs, home, fs, proc, dc.gui, dc.net)
                 if not keep_c and fs.exists(tmp_c):
                     fs.remove(tmp_c)
                 if cr.code != 0:
