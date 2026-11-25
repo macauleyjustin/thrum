@@ -1,0 +1,5 @@
+uncertainty budget for speed = 50.0 ± 2.7 km/h
+  input            contribution      share   sensitivity (km/h)
+  t                         2.5      86.2%   d/dx = -0.00694444
+  d                           1      13.8%   d/dx = 0.0005
+  combined                2.693

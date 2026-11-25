@@ -1,0 +1,14 @@
+var setpoint = 293.15 K
+var room     = 288.15 K
+let error    = setpoint - room
+let duty     = clamp(error / 5 K, 0, 1)
+
+with io, clock, rand(7):
+    on duty > 0.8 rise:
+        io.say("HEAT ON   room={room}  duty={fix(duty,2)}")
+    on duty < 0.1 fall:
+        io.say("HEAT OFF  room={room}")
+
+    repeat 6:
+        room = room + duty * 0.9 K - 0.2 K + (rand.float() - 0.5) * 0.1 K
+        io.say("  t: room={fix(room,3)} duty={fix(duty,3)}")

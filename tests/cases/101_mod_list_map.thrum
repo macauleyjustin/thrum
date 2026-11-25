@@ -1,0 +1,16 @@
+use list
+use map
+with io:
+    io.say(list.chunk([1, 2, 3, 4, 5], 2))
+    io.say(list.window([1, 2, 3, 4], 3))
+    io.say(list.take([10, 20, 30], 2))
+    io.say(list.drop([10, 20, 30], 1))
+    io.say(list.partition([1, 2, 3, 4], \it % 2 == 0))
+    io.say(list.group_by(["aa", "b", "cc"], \len(it)))
+    io.say(list.flat_map([1, 2], \([it, it * 10])))
+    let m1 = {a: 1, b: 2}
+    let m2 = map.merge(m1, {b: 9, c: 3})
+    io.say(map.pick(m2, ["a", "c"]))
+    io.say(map.omit(m2, ["b"]))
+    io.say(map.map_vals({x: 2, y: 3}, \it^2))
+    io.say(map.from_entries([["k", 42]]))

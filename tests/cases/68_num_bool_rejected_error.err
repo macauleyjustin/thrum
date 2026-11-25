@@ -1,0 +1,3 @@
+68_num_bool_rejected_error.thrum:1:9: error: cannot convert bool to num
+      1 | let x = num(true)
+        |         ^

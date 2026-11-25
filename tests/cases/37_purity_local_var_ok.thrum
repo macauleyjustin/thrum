@@ -1,0 +1,11 @@
+var n = 4
+fn sum_to(k):
+    var acc = 0
+    for i in 1..k:
+        acc += i
+    return acc
+let total = sum_to(n)
+with io:
+    io.say(total)
+    n = 6
+    io.say(total)

@@ -1,0 +1,9 @@
+with io:
+    try:
+        assert 1 == 2, "math broke"
+    catch e:
+        io.say("{e.message} @{e.line}")
+    try:
+        fail "boom"
+    catch e:
+        io.say(e.message)

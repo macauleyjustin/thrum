@@ -1,0 +1,6 @@
+with io, fs("./sandbox"):
+    io.say(fs.exists("a.txt"))
+    io.say(fs.read("a.txt"))
+    fs.write("b.txt", "written")
+    io.say(fs.list())
+    io.say(fs.read("b.txt"))

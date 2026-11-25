@@ -1,0 +1,5 @@
+record MassBox:
+    m: kg
+
+var b = MassBox(2 kg)
+b.m = 5 s

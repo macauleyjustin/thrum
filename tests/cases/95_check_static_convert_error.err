@@ -1,0 +1,3 @@
+95_check_static_convert_error.thrum:2:12: error: cannot convert m to kg
+      2 |     return 5 m as kg
+        |            ^

@@ -1,0 +1,6 @@
+with io:
+    io.say(2 * 5 ft)
+    io.say(10 ft / 2)
+    io.say(5 m / 10 cm)
+    io.say(10 s * 2 Hz)
+    io.say(0.5 * 2 kg * (3 m/s)^2)

@@ -1,0 +1,1075 @@
+use math
+use json
+use path
+use "./util.thrum" as u
+use "./units.thrum" as un
+use "./checker.thrum" as ck
+
+fn _build_ctrl_esc():
+    var m = {
+        "\\": "\\\\",
+        "\"": "\\\"",
+        "\n": "\\n",
+        "\r": "\\r",
+        "\t": "\\t",
+    }
+    let hex_digits = "0123456789abcdef"
+    let oct_digits = "01234567"
+    let hex_ch = list(hex_digits)
+    let oct_ch = list(oct_digits)
+    var code = 0
+    while code < 32:
+        if code != 9 and code != 10 and code != 13:
+            let hi = floor(code / 16)
+            let lo = code % 16
+            let ch = json.parse(r'"\u00' + hex_ch[hi] + hex_ch[lo] + r'"')
+            let o1 = floor(code / 8)
+            let o2 = code % 8
+            m[ch] = "\\0" + oct_ch[o1] + oct_ch[o2]
+        code += 1
+    return m
+
+pin CTRL_ESC = _build_ctrl_esc()
+
+pin U80 = json.parse(r'"\u0080"')
+pin U800 = json.parse(r'"\u0800"')
+pin U10000 = json.parse(r'"\uD800\uDC00"')
+
+fn c_str_lit(s):
+    let chars = list(s)
+    var b = u.buf_new()
+    b = u.buf_push(b, "\"")
+    var prev_q = false
+    for ch in chars:
+        if ch in CTRL_ESC:
+            b = u.buf_push(b, CTRL_ESC[ch])
+            prev_q = false
+        elif ch == "?" and prev_q:
+            # Break potential C trigraph '??'
+            b = u.buf_push(b, "\\?")
+            prev_q = false
+        else:
+            b = u.buf_push(b, ch)
+            prev_q = (ch == "?")
+    b = u.buf_push(b, "\"")
+    return u.str_buf_join(b)
+
+fn c_str_expr(s):
+    if "\0" in s:
+        var bcount = 0
+        for ch in list(s):
+            if ch < U80:
+                bcount += 1
+            elif ch < U800:
+                bcount += 2
+            elif ch < U10000:
+                bcount += 3
+            else:
+                bcount += 4
+        return "thrum_str(rt, " + c_str_lit(s) + ", " + str(bcount) + ")"
+    return "thrum_cstr(rt, " + c_str_lit(s) + ")"
+
+fn c_double(v):
+    let bv = bare(v)
+    if math.isnan(bv):
+        return "NAN"
+    if math.isinf(bv):
+        if bv > 0:
+            return "INFINITY"
+        return "-INFINITY"
+    if bv == 0.0:
+        return "0.0"
+    let s = json.stringify(bv)
+    if "." in s or "e" in s or "E" in s:
+        return s
+    return s + ".0"
+
+fn c_dim_lit(d):
+    var parts = []
+    var i = 0
+    while i < 7:
+        let f = d[i]
+        parts = push(parts, "\{" + str(f[0]) + ", " + str(f[1]) + "}")
+        i += 1
+    return "\{\{" + join(", ", parts) + "}}"
+
+fn c_dim_expr(d):
+    return "((TDim)" + c_dim_lit(d) + ")"
+
+fn c_type_ann(ann):
+    if ann == nil:
+        return "\{ANN_NONE, NULL, " + c_dim_lit(un.D0) + "}"
+    if ann.kind == "kind":
+        return "\{ANN_KIND, " + c_str_lit(ann.name) + ", " + c_dim_lit(un.D0) + "}"
+    if ann.kind == "dim":
+        return "\{ANN_DIM, " + c_str_lit(ann.sym) + ", " + c_dim_lit(ann.dim) + "}"
+    if ann.kind == "record":
+        return "\{ANN_RECORD, " + c_str_lit(ann.short) + ", " + c_dim_lit(un.D0) + "}"
+    return "\{ANN_NONE, NULL, " + c_dim_lit(un.D0) + "}"
+
+fn c_qty_expr(qv):
+    if qv.disp == nil and qv.u == 0.0 and un.dimless(qv.dim):
+        return "thrum_num_dimless(" + c_double(qv.v) + ")"
+    var sc = 1.0
+    var sym_c = "NULL"
+    if qv.disp != nil:
+        sc = qv.disp.sc
+        sym_c = c_str_lit(qv.disp.sym)
+    return "thrum_qty(rt, " + c_double(qv.v) + ", " + c_double(qv.u) + ", " + c_dim_expr(qv.dim) + ", " + c_double(sc) + ", " + sym_c + ")"
+
+pin ASSIGN_OP_CODE = {
+    "=": "0", "+=": "1", "-=": "2", "*=": "3", "/=": "4", "^=": "5", "%=": "6",
+}
+
+pin CMP_OP_CODE = {"<": "0", ">": "1", "<=": "2", ">=": "3"}
+
+fn generate_c(checked, prog_path, stdlib_dir):
+    let file_keys = checked.file_keys
+    var protos = u.buf_new()
+    var funcs = u.buf_new()
+    var stmts = u.buf_new()
+    var seq = 0
+    var indent = 1
+    var loop_stack = []
+    var in_fn = false
+    var uses_gui = false
+
+    fn new_id():
+        seq += 1
+        return seq
+
+    fn add(line_s):
+        let pad = "    " * indent
+        stmts = u.buf_push(stmts, pad + line_s)
+
+    fn new_tmp(init_expr):
+        let id = new_id()
+        let nm = "_t_" + str(id)
+        add("T_VAR(rt, " + nm + ", " + init_expr + ");")
+        return nm
+
+    fn emit_pat_match(pat, val_var, menv_var, ok_var, site):
+        let line = str(site.line)
+        let col = str(site.col)
+        if pat.kind == "wild":
+            return
+        if pat.kind == "lit":
+            var lv = "thrum_nil()"
+            if pat.lkind == "bool":
+                if pat.val:
+                    lv = "thrum_bool(true)"
+                else:
+                    lv = "thrum_bool(false)"
+            elif pat.lkind == "str":
+                lv = c_str_expr(pat.val)
+            elif pat.lkind == "num":
+                lv = c_qty_expr(pat.val)
+            let lt = new_tmp(lv)
+            add("if (!thrum_veq(" + val_var + ", " + lt + ")) " + ok_var + " = false;")
+            return
+        if pat.kind == "bind":
+            add("thrum_def_var(rt, " + menv_var + ", " + c_str_lit(pat.name) + ", " + val_var + ", " + line + ", " + col + ");")
+            return
+        if pat.kind == "map":
+            add("if (" + val_var + ".kind != TV_OBJ || " + val_var + ".as.obj->kind != OBJ_MAP) \{")
+            indent += 1
+            add(ok_var + " = false;")
+            indent -= 1
+            add("} else \{")
+            indent += 1
+            let mptr = "_pm_" + str(new_id())
+            add("TMap* " + mptr + " = (TMap*)" + val_var + ".as.obj;")
+            for it in pat.items:
+                add("if (" + ok_var + ") \{")
+                indent += 1
+                let kv = new_tmp(c_str_expr(it.k))
+                let sv = new_tmp("thrum_nil()")
+                add("if (!thrum_map_get(" + mptr + ", " + kv + ", &" + sv + ")) \{")
+                indent += 1
+                add(ok_var + " = false;")
+                indent -= 1
+                add("} else \{")
+                indent += 1
+                emit_pat_match(it.p, sv, menv_var, ok_var, site)
+                indent -= 1
+                add("}")
+                indent -= 1
+                add("}")
+            indent -= 1
+            add("}")
+            return
+        if pat.kind == "record":
+            add("if (" + val_var + ".kind != TV_OBJ || " + val_var + ".as.obj->kind != OBJ_RECVAL || strcmp(((TRecVal*)" + val_var + ".as.obj)->rtype->name, " + c_str_lit(pat.name) + ") != 0) \{")
+            indent += 1
+            add(ok_var + " = false;")
+            indent -= 1
+            add("} else \{")
+            indent += 1
+            let rptr = "_pr_" + str(new_id())
+            add("TRecVal* " + rptr + " = (TRecVal*)" + val_var + ".as.obj;")
+            for it in pat.items:
+                add("if (" + ok_var + ") \{")
+                indent += 1
+                let fi = "_pfi_" + str(new_id())
+                add("int " + fi + " = -1;")
+                add("for (int _k = 0; _k < " + rptr + "->rtype->nfields; _k++) \{ if (strcmp(" + rptr + "->rtype->fields[_k].name, " + c_str_lit(it.k) + ") == 0) \{ " + fi + " = _k; break; } }")
+                add("if (" + fi + " < 0) \{ " + ok_var + " = false; } else \{")
+                indent += 1
+                let sv = new_tmp(rptr + "->fields[" + fi + "]")
+                emit_pat_match(it.p, sv, menv_var, ok_var, site)
+                indent -= 1
+                add("}")
+                indent -= 1
+                add("}")
+            indent -= 1
+            add("}")
+            return
+        if pat.kind == "list":
+            let n_items = len(pat.items)
+            var len_chk = "->len != " + str(n_items)
+            if pat.rest != nil:
+                len_chk = "->len < " + str(n_items)
+            add("if (" + val_var + ".kind != TV_OBJ || " + val_var + ".as.obj->kind != OBJ_LIST || ((TList*)" + val_var + ".as.obj)" + len_chk + ") \{")
+            indent += 1
+            add(ok_var + " = false;")
+            indent -= 1
+            add("} else \{")
+            indent += 1
+            let lptr = "_pl_" + str(new_id())
+            add("TList* " + lptr + " = (TList*)" + val_var + ".as.obj;")
+            var idx = 0
+            for sub in pat.items:
+                add("if (" + ok_var + ") \{")
+                indent += 1
+                let sv = new_tmp(lptr + "->items[" + str(idx) + "]")
+                emit_pat_match(sub, sv, menv_var, ok_var, site)
+                indent -= 1
+                add("}")
+                idx += 1
+            if pat.rest != nil:
+                add("if (" + ok_var + ") \{")
+                indent += 1
+                let rv = new_tmp("thrum_get_slice(rt, " + val_var + ", true, thrum_num_dimless(" + str(n_items) + ".0), false, thrum_nil(), false, thrum_nil(), " + line + ", " + col + ")")
+                add("thrum_def_var(rt, " + menv_var + ", " + c_str_lit(pat.rest) + ", " + rv + ", " + line + ", " + col + ");")
+                indent -= 1
+                add("}")
+            indent -= 1
+            add("}")
+            return
+
+    fn emit_thunk(ex, env_expr = "env"):
+        let fid = "_thrum_ex_" + str(new_id())
+        let saved_stmts = stmts
+        let saved_ind = indent
+        let saved_loops = loop_stack
+        let saved_fn = in_fn
+        stmts = u.buf_new()
+        indent = 1
+        loop_stack = []
+        in_fn = false
+        let rv = emit_expr(ex, "env")
+        add("rt->root_top = _fn_root;")
+        add("return " + rv + ";")
+        let body_c = u.buf_join(stmts, "\n")
+        stmts = saved_stmts
+        indent = saved_ind
+        loop_stack = saved_loops
+        in_fn = saved_fn
+        protos = u.buf_push(protos, "static TVal " + fid + "(TRuntime* rt, TEnv* env);")
+        funcs = u.buf_push(funcs, "static TVal " + fid + "(TRuntime* rt, TEnv* env) \{\n    int _fn_root = rt->root_top;\n    (void)env;\n" + body_c + "\n}")
+        return fid
+
+    fn emit_block_thunk(body, unit_path):
+        let fid = "_thrum_blk_" + str(new_id())
+        let saved_stmts = stmts
+        let saved_ind = indent
+        let saved_loops = loop_stack
+        let saved_fn = in_fn
+        stmts = u.buf_new()
+        indent = 1
+        loop_stack = []
+        in_fn = false
+        emit_stmts(body, "env", unit_path)
+        add("rt->root_top = _fn_root;")
+        add("return thrum_nil();")
+        let body_c = u.buf_join(stmts, "\n")
+        stmts = saved_stmts
+        indent = saved_ind
+        loop_stack = saved_loops
+        in_fn = saved_fn
+        protos = u.buf_push(protos, "static TVal " + fid + "(TRuntime* rt, TEnv* env);")
+        funcs = u.buf_push(funcs, "static TVal " + fid + "(TRuntime* rt, TEnv* env) \{\n    int _fn_root = rt->root_top;\n    int _fn_try = rt->try_top;\n    int _fn_cln = rt->cleanup_top;\n    (void)_fn_root; (void)_fn_try; (void)_fn_cln; (void)env;\n" + body_c + "\n}")
+        return fid
+
+    fn emit_fn_def(fn_name, ps, ret_ann, reqs, ens, body, cur_env, unit_path):
+        let fid = "_thrum_fn_" + str(new_id())
+        let saved_stmts = stmts
+        let saved_ind = indent
+        let saved_loops = loop_stack
+        let saved_fn = in_fn
+        stmts = u.buf_new()
+        indent = 1
+        loop_stack = []
+        in_fn = true
+        emit_stmts(body, "env", unit_path)
+        add("rt->root_top = _fn_root;")
+        add("return thrum_nil();")
+        let body_c = u.buf_join(stmts, "\n")
+        stmts = saved_stmts
+        indent = saved_ind
+        loop_stack = saved_loops
+        in_fn = saved_fn
+        protos = u.buf_push(protos, "static TVal " + fid + "(TRuntime* rt, TEnv* env, int argc, TVal* argv);")
+        funcs = u.buf_push(funcs, "static TVal " + fid + "(TRuntime* rt, TEnv* env, int argc, TVal* argv) \{\n    (void)argc; (void)argv; (void)env;\n    int _fn_root = rt->root_top;\n    int _fn_try = rt->try_top;\n    int _fn_cln = rt->cleanup_top;\n    (void)_fn_root; (void)_fn_try; (void)_fn_cln;\n" + body_c + "\n}")
+
+        let n_ps = len(ps)
+        var ps_arg = "NULL"
+        if n_ps > 0:
+            let ps_arr = "_ps_" + str(new_id())
+            var pitems = []
+            for prm in ps:
+                var hd = "false"
+                var df_fn = "NULL"
+                if prm.default != nil:
+                    hd = "true"
+                    df_fn = emit_thunk(prm.default)
+                pitems = push(pitems, "\{" + c_str_lit(prm.name) + ", " + c_type_ann(prm.type) + ", " + hd + ", " + df_fn + "}")
+            add("TParamSpec " + ps_arr + "[" + str(n_ps) + "] = \{" + join(", ", pitems) + "};")
+            ps_arg = ps_arr
+
+        let n_req = len(reqs)
+        var req_arg = "NULL"
+        if n_req > 0:
+            let req_arr = "_rq_" + str(new_id())
+            var ritems = []
+            for c in reqs:
+                let cf = emit_thunk(c.cond)
+                var mf = "NULL"
+                if c.msg != nil:
+                    mf = emit_thunk(c.msg)
+                ritems = push(ritems, "\{false, " + cf + ", " + mf + ", " + c_str_lit(c.src) + "}")
+            add("TContractSpec " + req_arr + "[" + str(n_req) + "] = \{" + join(", ", ritems) + "};")
+            req_arg = req_arr
+
+        let n_ens = len(ens)
+        var ens_arg = "NULL"
+        if n_ens > 0:
+            let ens_arr = "_en_" + str(new_id())
+            var eitems = []
+            for c in ens:
+                let cf = emit_thunk(c.cond)
+                var mf = "NULL"
+                if c.msg != nil:
+                    mf = emit_thunk(c.msg)
+                eitems = push(eitems, "\{true, " + cf + ", " + mf + ", " + c_str_lit(c.src) + "}")
+            add("TContractSpec " + ens_arr + "[" + str(n_ens) + "] = \{" + join(", ", eitems) + "};")
+            ens_arg = ens_arr
+
+        let rt_var = "_ra_" + str(new_id())
+        add("TTypeAnn " + rt_var + " = " + c_type_ann(ret_ann) + ";")
+        var nm_c = "NULL"
+        if fn_name != nil:
+            nm_c = c_str_lit(fn_name)
+        return new_tmp("thrum_make_fn(rt, " + cur_env + ", " + nm_c + ", " + fid + ", " + str(n_ps) + ", " + ps_arg + ", " + rt_var + ", " + str(n_req) + ", " + req_arg + ", " + str(n_ens) + ", " + ens_arg + ")")
+
+    fn emit_expr(n, cur_env):
+        let k = n.kind
+        let line = str(n.site.line)
+        let col = str(n.site.col)
+
+        if k == "q":
+            if n.lkind == "nil":
+                return new_tmp("thrum_nil()")
+            if n.lkind == "bool":
+                if n.val:
+                    return new_tmp("thrum_bool(true)")
+                return new_tmp("thrum_bool(false)")
+            if n.lkind == "str":
+                return new_tmp(c_str_expr(n.val))
+            return new_tmp(c_qty_expr(n.val))
+
+        if k == "name":
+            return new_tmp("thrum_read(rt, " + cur_env + ", " + c_str_lit(n.name) + ", " + line + ", " + col + ")")
+
+        if k == "text":
+            let np = len(n.parts)
+            if np == 0:
+                return new_tmp("thrum_cstr(rt, \"\")")
+            var pvars = []
+            for prt in n.parts:
+                if prt.t == "str":
+                    pvars = push(pvars, new_tmp(c_str_expr(prt.v)))
+                else:
+                    pvars = push(pvars, emit_expr(prt.v, cur_env))
+            let parr = "_tp_" + str(new_id())
+            add("TVal " + parr + "[" + str(np) + "] = \{" + join(", ", pvars) + "};")
+            return new_tmp("thrum_interp_text(rt, " + str(np) + ", " + parr + ")")
+
+        if k == "list":
+            let ni = len(n.items)
+            let lv = new_tmp("thrum_list(rt, " + str(ni) + ")")
+            if ni > 0:
+                let lptr = "_lp_" + str(new_id())
+                add("TList* " + lptr + " = (TList*)" + lv + ".as.obj;")
+                for it in n.items:
+                    let iv = emit_expr(it, cur_env)
+                    add("thrum_list_push(rt, " + lptr + ", " + iv + ");")
+            return lv
+
+        if k == "map":
+            let mv = new_tmp("thrum_map(rt)")
+            if len(n.entries) > 0:
+                let mptr = "_mp_" + str(new_id())
+                add("TMap* " + mptr + " = (TMap*)" + mv + ".as.obj;")
+                for en in n.entries:
+                    let kv = emit_expr(en.k, cur_env)
+                    add("if (" + kv + ".kind == TV_OBJ && (" + kv + ".as.obj->kind == OBJ_LIST || " + kv + ".as.obj->kind == OBJ_MAP)) \{")
+                    indent += 1
+                    add("char _kmsg[96]; snprintf(_kmsg, sizeof(_kmsg), \"map keys cannot be %s\", thrum_tname(" + kv + "));")
+                    add("thrum_error(rt, " + line + ", " + col + ", _kmsg, NULL);")
+                    indent -= 1
+                    add("}")
+                    let vv = emit_expr(en.v, cur_env)
+                    add("thrum_map_set(rt, " + mptr + ", " + kv + ", " + vv + ");")
+            return mv
+
+        if k == "rec_lit":
+            let rt_v = emit_expr(n.target, cur_env)
+            let pmap = new_tmp("thrum_map(rt)")
+            var mref = "(TMap*)" + pmap + ".as.obj"
+            if len(n.entries) > 0:
+                let mptr = "_rmp_" + str(new_id())
+                add("TMap* " + mptr + " = (TMap*)" + pmap + ".as.obj;")
+                for en in n.entries:
+                    let kv = emit_expr(en.k, cur_env)
+                    let vv = emit_expr(en.v, cur_env)
+                    add("thrum_map_set(rt, " + mptr + ", " + kv + ", " + vv + ");")
+                mref = mptr
+            return new_tmp("thrum_make_record_map(rt, " + rt_v + ", " + mref + ", " + line + ", " + col + ")")
+
+        if k == "un":
+            let vv = emit_expr(n.operand, cur_env)
+            if n.op == "not":
+                return new_tmp("thrum_bool(!thrum_truthy(" + vv + "))")
+            return new_tmp("thrum_neg(rt, " + vv + ", " + line + ", " + col + ")")
+
+        if k == "convert":
+            let ov = emit_expr(n.obj, cur_env)
+            return new_tmp("thrum_convert(rt, " + ov + ", " + c_str_lit(n.unit) + ", " + line + ", " + col + ")")
+
+        if k == "call":
+            let fv = emit_expr(n.fn_expr, cur_env)
+            let na = len(n.args)
+            var avars = []
+            for a in n.args:
+                avars = push(avars, emit_expr(a, cur_env))
+            var aarg = "NULL"
+            if na > 0:
+                let arr = "_ca_" + str(new_id())
+                add("TVal " + arr + "[" + str(na) + "] = \{" + join(", ", avars) + "};")
+                aarg = arr
+            return new_tmp("thrum_call(rt, " + fv + ", " + str(na) + ", " + aarg + ", " + line + ", " + col + ")")
+
+        if k == "index":
+            let ov = emit_expr(n.obj, cur_env)
+            let iv = emit_expr(n.idx, cur_env)
+            return new_tmp("thrum_get_index(rt, " + ov + ", " + iv + ", " + line + ", " + col + ")")
+
+        if k == "slice":
+            let ov = emit_expr(n.obj, cur_env)
+            var h_st = "false"
+            var st_v = "thrum_nil()"
+            if n.start != nil:
+                h_st = "true"
+                st_v = emit_expr(n.start, cur_env)
+            var h_sp = "false"
+            var sp_v = "thrum_nil()"
+            if n.stop != nil:
+                h_sp = "true"
+                sp_v = emit_expr(n.stop, cur_env)
+            var h_pt = "false"
+            var pt_v = "thrum_nil()"
+            if n.step != nil:
+                h_pt = "true"
+                pt_v = emit_expr(n.step, cur_env)
+            return new_tmp("thrum_get_slice(rt, " + ov + ", " + h_st + ", " + st_v + ", " + h_sp + ", " + sp_v + ", " + h_pt + ", " + pt_v + ", " + line + ", " + col + ")")
+
+        if k == "dot":
+            let ov = emit_expr(n.obj, cur_env)
+            return new_tmp("thrum_get_dot(rt, " + ov + ", " + c_str_lit(n.name) + ", " + line + ", " + col + ")")
+
+        if k == "lambda":
+            let lparam = [{kind: "param", site: n.site, name: "it", type: nil, default: nil}]
+            let lbody = [{kind: "return", site: n.site, value: n.body}]
+            return emit_fn_def(nil, lparam, nil, [], [], lbody, cur_env, "<lambda>")
+
+        if k == "fnexpr":
+            return emit_fn_def(nil, n.params, n.ret, n.requires, n.ensures, n.body, cur_env, "<fn>")
+
+        if k == "comp":
+            let iv = emit_expr(n.iter, cur_env)
+            add("if (" + iv + ".kind != TV_OBJ || " + iv + ".as.obj->kind != OBJ_LIST) thrum_error(rt, " + line + ", " + col + ", \"comprehension needs a list\", NULL);")
+            let out_v = new_tmp("thrum_list(rt, ((TList*)" + iv + ".as.obj)->len)")
+            let ilst = "_cl_" + str(new_id())
+            let olst = "_co_" + str(new_id())
+            let croot = "_cr_" + str(new_id())
+            add("TList* " + ilst + " = (TList*)" + iv + ".as.obj;")
+            add("TList* " + olst + " = (TList*)" + out_v + ".as.obj;")
+            add("int " + croot + " = rt->root_top;")
+            let idx_v = "_ci_" + str(new_id())
+            add("for (size_t " + idx_v + " = 0; " + idx_v + " < " + ilst + "->len; " + idx_v + "++) \{")
+            indent += 1
+            let cenv = "_ce_" + str(new_id())
+            add("TEnv* " + cenv + " = thrum_env_new(rt, " + cur_env + ", false);")
+            let cev = new_tmp("thrum_obj((TObj*)" + cenv + ")")
+            add("(void)" + cev + ";")
+            add("thrum_def_var(rt, " + cenv + ", " + c_str_lit(n.var_name) + ", " + ilst + "->items[" + idx_v + "], " + line + ", " + col + ");")
+            if n.cond != nil:
+                let cv = emit_expr(n.cond, cenv)
+                add("if (thrum_truthy(" + cv + ")) \{")
+                indent += 1
+                let ev = emit_expr(n.elem, cenv)
+                add("thrum_list_push(rt, " + olst + ", " + ev + ");")
+                indent -= 1
+                add("}")
+            else:
+                let ev = emit_expr(n.elem, cenv)
+                add("thrum_list_push(rt, " + olst + ", " + ev + ");")
+            add("rt->root_top = " + croot + ";")
+            indent -= 1
+            add("}")
+            return out_v
+
+        if k == "bin":
+            let op = n.op
+            if op == "and":
+                let lv = emit_expr(n.left, cur_env)
+                let out = new_tmp("thrum_bool(false)")
+                add("if (thrum_truthy(" + lv + ")) \{")
+                indent += 1
+                let rv = emit_expr(n.right, cur_env)
+                add(out + " = thrum_bool(thrum_truthy(" + rv + "));")
+                indent -= 1
+                add("}")
+                return out
+            if op == "or":
+                let lv = emit_expr(n.left, cur_env)
+                let out = new_tmp("thrum_bool(true)")
+                add("if (!thrum_truthy(" + lv + ")) \{")
+                indent += 1
+                let rv = emit_expr(n.right, cur_env)
+                add(out + " = thrum_bool(thrum_truthy(" + rv + "));")
+                indent -= 1
+                add("}")
+                return out
+            if op == "??":
+                let lv = emit_expr(n.left, cur_env)
+                let out = new_tmp(lv)
+                add("if (" + out + ".kind == TV_NIL) \{")
+                indent += 1
+                let rv = emit_expr(n.right, cur_env)
+                add(out + " = " + rv + ";")
+                indent -= 1
+                add("}")
+                return out
+            let lv = emit_expr(n.left, cur_env)
+            let rv = emit_expr(n.right, cur_env)
+            if op == "+":
+                return new_tmp("thrum_add(rt, " + lv + ", " + rv + ", " + line + ", " + col + ")")
+            if op == "-":
+                return new_tmp("thrum_sub(rt, " + lv + ", " + rv + ", " + line + ", " + col + ")")
+            if op == "*":
+                return new_tmp("thrum_mul(rt, " + lv + ", " + rv + ", " + line + ", " + col + ")")
+            if op == "/":
+                return new_tmp("thrum_div(rt, " + lv + ", " + rv + ", " + line + ", " + col + ")")
+            if op == "%":
+                return new_tmp("thrum_mod(rt, " + lv + ", " + rv + ", " + line + ", " + col + ")")
+            if op == "^":
+                return new_tmp("thrum_pow(rt, " + lv + ", " + rv + ", " + line + ", " + col + ")")
+            if op == "==":
+                return new_tmp("thrum_bool(thrum_veq(" + lv + ", " + rv + "))")
+            if op == "!=":
+                return new_tmp("thrum_bool(!thrum_veq(" + lv + ", " + rv + "))")
+            if op == "~":
+                return new_tmp("thrum_bool(thrum_approx(" + lv + ", " + rv + ", 3.0))")
+            if op == "in":
+                return new_tmp("thrum_bool(thrum_in(rt, " + lv + ", " + rv + ", " + line + ", " + col + "))")
+            if op == "notin":
+                return new_tmp("thrum_bool(!thrum_in(rt, " + lv + ", " + rv + ", " + line + ", " + col + "))")
+            if op == "..":
+                return new_tmp("thrum_range_op(rt, " + lv + ", " + rv + ", false, " + line + ", " + col + ")")
+            if op == "..<":
+                return new_tmp("thrum_range_op(rt, " + lv + ", " + rv + ", true, " + line + ", " + col + ")")
+            if op in CMP_OP_CODE:
+                return new_tmp("thrum_bool(thrum_cmp(rt, " + lv + ", " + rv + ", " + CMP_OP_CODE[op] + ", " + line + ", " + col + "))")
+
+        return new_tmp("thrum_nil()")
+
+    fn emit_stmts(body, cur_env, unit_path):
+        for st in body:
+            emit_stmt(st, cur_env, unit_path)
+
+    fn emit_stmt(n, cur_env, unit_path):
+        let k = n.kind
+        let line = str(n.site.line)
+        let col = str(n.site.col)
+
+        if k == "exprstmt":
+            emit_expr(n.value, cur_env)
+            return
+
+        if k == "decl":
+            if n.kw == "var":
+                let vv = emit_expr(n.value, cur_env)
+                add("thrum_def_var(rt, " + cur_env + ", " + c_str_lit(n.name) + ", " + vv + ", " + line + ", " + col + ");")
+            elif n.kw == "pin":
+                let vv = emit_expr(n.value, cur_env)
+                add("thrum_def_pin(rt, " + cur_env + ", " + c_str_lit(n.name) + ", " + vv + ");")
+            else:
+                let ex_fn = emit_thunk(n.value)
+                var h_init = "false"
+                var in_fn_c = "NULL"
+                if n.init != nil:
+                    h_init = "true"
+                    in_fn_c = emit_thunk(n.init)
+                add("thrum_def_let(rt, " + cur_env + ", " + c_str_lit(n.name) + ", " + ex_fn + ", " + c_str_lit(n.src) + ", " + line + ", " + col + ", " + h_init + ", " + in_fn_c + ");")
+            return
+
+        if k == "record":
+            let nf = len(n.fields)
+            let farr = "_rfs_" + str(new_id())
+            var fitems = []
+            for fd in n.fields:
+                var hd = "false"
+                var df_fn = "NULL"
+                if fd.default != nil:
+                    hd = "true"
+                    df_fn = emit_thunk(fd.default)
+                fitems = push(fitems, "\{" + c_str_lit(fd.name) + ", " + c_type_ann(fd.type) + ", " + hd + ", " + df_fn + "}")
+            add("TFieldSpec " + farr + "[" + str(nf) + "] = \{" + join(", ", fitems) + "};")
+            add("(void)thrum_def_record(rt, " + cur_env + ", " + c_str_lit(n.name) + ", " + str(nf) + ", " + farr + ");")
+            return
+
+        if k == "assign":
+            var path = []
+            var cur = n.target
+            while cur.kind == "index" or cur.kind == "dot":
+                if cur.kind == "index":
+                    path = push(path, {is_idx: true, expr: cur.idx})
+                else:
+                    path = push(path, {is_idx: false, name: cur.name})
+                cur = cur.obj
+            let np = len(path)
+            var is_idx_arr = "NULL"
+            var pval_arr = "NULL"
+            if np > 0:
+                var rev = []
+                var pi = np - 1
+                while pi >= 0:
+                    rev = push(rev, path[pi])
+                    pi -= 1
+                var bflags = []
+                var pvars = []
+                for seg in rev:
+                    if seg.is_idx:
+                        bflags = push(bflags, "true")
+                        pvars = push(pvars, emit_expr(seg.expr, cur_env))
+                    else:
+                        bflags = push(bflags, "false")
+                        pvars = push(pvars, new_tmp(c_str_expr(seg.name)))
+                let ia = "_ai_" + str(new_id())
+                let pa = "_ap_" + str(new_id())
+                add("bool " + ia + "[" + str(np) + "] = \{" + join(", ", bflags) + "};")
+                add("TVal " + pa + "[" + str(np) + "] = \{" + join(", ", pvars) + "};")
+                is_idx_arr = ia
+                pval_arr = pa
+            let rhs_v = emit_expr(n.value, cur_env)
+            add("thrum_assign(rt, " + cur_env + ", " + c_str_lit(cur.name) + ", " + str(np) + ", " + is_idx_arr + ", " + pval_arr + ", " + ASSIGN_OP_CODE[n.op] + ", " + rhs_v + ", " + line + ", " + col + ");")
+            return
+
+        if k == "fndecl":
+            let fn_v = emit_fn_def(n.name, n.params, n.ret, n.requires, n.ensures, n.body, cur_env, unit_path)
+            add("thrum_def_pin(rt, " + cur_env + ", " + c_str_lit(n.name) + ", " + fn_v + ");")
+            return
+
+        if k == "if":
+            var first = true
+            for arm in n.arms:
+                if first:
+                    let cv = emit_expr(arm.cond, cur_env)
+                    add("if (thrum_truthy(" + cv + ")) \{")
+                    indent += 1
+                    emit_stmts(arm.body, cur_env, unit_path)
+                    indent -= 1
+                    add("}")
+                    first = false
+                else:
+                    add("else \{")
+                    indent += 1
+                    let cv2 = emit_expr(arm.cond, cur_env)
+                    add("if (thrum_truthy(" + cv2 + ")) \{")
+                    indent += 1
+                    emit_stmts(arm.body, cur_env, unit_path)
+                    indent -= 1
+                    add("}")
+            if n.els != nil:
+                add("else \{")
+                indent += 1
+                emit_stmts(n.els, cur_env, unit_path)
+                indent -= 1
+                add("}")
+            # Close nested else blocks for elif chains cleanly
+            var ec = len(n.arms) - 1
+            while ec > 0:
+                indent -= 1
+                add("}")
+                ec -= 1
+            return
+
+        if k == "for":
+            let iv = emit_expr(n.iter, cur_env)
+            let iter_v = new_tmp("thrum_nil()")
+            add("if (" + iv + ".kind == TV_OBJ && " + iv + ".as.obj->kind == OBJ_STR) \{")
+            indent += 1
+            let lfn = new_tmp("thrum_read(rt, rt->builtins, \"list\", " + line + ", " + col + ")")
+            add(iter_v + " = thrum_call(rt, " + lfn + ", 1, &" + iv + ", " + line + ", " + col + ");")
+            indent -= 1
+            add("} else if (" + iv + ".kind == TV_OBJ && " + iv + ".as.obj->kind == OBJ_LIST) \{")
+            indent += 1
+            add(iter_v + " = " + iv + ";")
+            indent -= 1
+            add("} else \{")
+            indent += 1
+            add("char _fmsg[96]; snprintf(_fmsg, sizeof(_fmsg), \"cannot iterate %s\", thrum_tname(" + iv + "));")
+            add("thrum_error(rt, " + line + ", " + col + ", _fmsg, NULL);")
+            indent -= 1
+            add("}")
+            let lptr = "_fl_" + str(new_id())
+            let lroot = "_fr_" + str(new_id())
+            let ltry = "_ft_" + str(new_id())
+            let lcln = "_fc_" + str(new_id())
+            add("TList* " + lptr + " = (TList*)" + iter_v + ".as.obj;")
+            add("int " + lroot + " = rt->root_top, " + ltry + " = rt->try_top, " + lcln + " = rt->cleanup_top;")
+            add("(void)" + ltry + "; (void)" + lcln + ";")
+            let fidx = "_fi_" + str(new_id())
+            add("for (size_t " + fidx + " = 0; " + fidx + " < " + lptr + "->len; " + fidx + "++) \{")
+            indent += 1
+            let fenv = "_fe_" + str(new_id())
+            add("TEnv* " + fenv + " = thrum_env_new(rt, " + cur_env + ", false);")
+            let fev = new_tmp("thrum_obj((TObj*)" + fenv + ")")
+            add("(void)" + fev + ";")
+            let itm = new_tmp(lptr + "->items[" + fidx + "]")
+            if n.b != nil:
+                add("if (" + itm + ".kind != TV_OBJ || " + itm + ".as.obj->kind != OBJ_LIST || ((TList*)" + itm + ".as.obj)->len != 2) thrum_error(rt, " + line + ", " + col + ", \"expected pairs to unpack\", NULL);")
+                add("thrum_def_var(rt, " + fenv + ", " + c_str_lit(n.a) + ", ((TList*)" + itm + ".as.obj)->items[0], " + line + ", " + col + ");")
+                add("thrum_def_var(rt, " + fenv + ", " + c_str_lit(n.b) + ", ((TList*)" + itm + ".as.obj)->items[1], " + line + ", " + col + ");")
+            else:
+                add("thrum_def_var(rt, " + fenv + ", " + c_str_lit(n.a) + ", " + itm + ", " + line + ", " + col + ");")
+            loop_stack = push(loop_stack, {root_v: lroot, try_v: ltry, cln_v: lcln})
+            emit_stmts(n.body, fenv, unit_path)
+            loop_stack = pop(loop_stack)
+            add("rt->root_top = " + lroot + ";")
+            indent -= 1
+            add("}")
+            return
+
+        if k == "while":
+            let lroot = "_wr_" + str(new_id())
+            let ltry = "_wt_" + str(new_id())
+            let lcln = "_wc_" + str(new_id())
+            add("int " + lroot + " = rt->root_top, " + ltry + " = rt->try_top, " + lcln + " = rt->cleanup_top;")
+            add("(void)" + ltry + "; (void)" + lcln + ";")
+            add("while (1) \{")
+            indent += 1
+            let cv = emit_expr(n.cond, cur_env)
+            add("if (!thrum_truthy(" + cv + ")) \{ rt->root_top = " + lroot + "; break; }")
+            loop_stack = push(loop_stack, {root_v: lroot, try_v: ltry, cln_v: lcln})
+            emit_stmts(n.body, cur_env, unit_path)
+            loop_stack = pop(loop_stack)
+            add("rt->root_top = " + lroot + ";")
+            indent -= 1
+            add("}")
+            return
+
+        if k == "repeat":
+            let cv = emit_expr(n.count, cur_env)
+            let cnt_v = "_rpc_" + str(new_id())
+            add("int64_t " + cnt_v + " = thrum_need_int(rt, " + cv + ", " + line + ", " + col + ");")
+            let lroot = "_rr_" + str(new_id())
+            let ltry = "_rt_" + str(new_id())
+            let lcln = "_rc_" + str(new_id())
+            add("int " + lroot + " = rt->root_top, " + ltry + " = rt->try_top, " + lcln + " = rt->cleanup_top;")
+            add("(void)" + ltry + "; (void)" + lcln + ";")
+            let ri = "_ri_" + str(new_id())
+            add("for (int64_t " + ri + " = 0; " + ri + " < " + cnt_v + "; " + ri + "++) \{")
+            indent += 1
+            loop_stack = push(loop_stack, {root_v: lroot, try_v: ltry, cln_v: lcln})
+            emit_stmts(n.body, cur_env, unit_path)
+            loop_stack = pop(loop_stack)
+            add("rt->root_top = " + lroot + ";")
+            indent -= 1
+            add("}")
+            return
+
+        if k == "match":
+            add("\{")
+            indent += 1
+            let sv = emit_expr(n.subject, cur_env)
+            let done_v = "_md_" + str(new_id())
+            add("bool " + done_v + " = false;")
+            for cs in n.cases:
+                add("if (!" + done_v + ") \{")
+                indent += 1
+                let menv = "_me_" + str(new_id())
+                add("TEnv* " + menv + " = thrum_env_new(rt, " + cur_env + ", false);")
+                let mev = new_tmp("thrum_obj((TObj*)" + menv + ")")
+                add("(void)" + mev + ";")
+                let ok_v = "_mok_" + str(new_id())
+                add("bool " + ok_v + " = true;")
+                emit_pat_match(cs.pat, sv, menv, ok_v, n.site)
+                if cs.guard != nil:
+                    add("if (" + ok_v + ") \{")
+                    indent += 1
+                    let gv = emit_expr(cs.guard, menv)
+                    add("if (!thrum_truthy(" + gv + ")) " + ok_v + " = false;")
+                    indent -= 1
+                    add("}")
+                add("if (" + ok_v + ") \{")
+                indent += 1
+                add(done_v + " = true;")
+                emit_stmts(cs.body, menv, unit_path)
+                indent -= 1
+                add("}")
+                indent -= 1
+                add("}")
+            add("(void)" + done_v + ";")
+            indent -= 1
+            add("}")
+            return
+
+        if k == "try":
+            let tf = "_tf_" + str(new_id())
+            add("int " + tf + " = thrum_push_try(rt);")
+            add("if (setjmp(rt->try_stack[" + tf + "].buf) == 0) \{")
+            indent += 1
+            emit_stmts(n.body, cur_env, unit_path)
+            add("thrum_pop_try(rt);")
+            indent -= 1
+            add("} else \{")
+            indent += 1
+            let henv = "_he_" + str(new_id())
+            add("TEnv* " + henv + " = thrum_env_new(rt, " + cur_env + ", " + cur_env + "->rel);")
+            let hev = new_tmp("thrum_obj((TObj*)" + henv + ")")
+            add("(void)" + hev + ";")
+            add("thrum_def_var(rt, " + henv + ", " + c_str_lit(n.name) + ", thrum_last_error_map(rt), " + line + ", " + col + ");")
+            emit_stmts(n.handler, henv, unit_path)
+            indent -= 1
+            add("}")
+            return
+
+        if k == "return":
+            var rv = "thrum_nil()"
+            if n.value != nil:
+                rv = emit_expr(n.value, cur_env)
+            let ret_tmp = "_rv_" + str(new_id())
+            add("TVal " + ret_tmp + " = " + rv + ";")
+            add("thrum_unwind_cleanups(rt, _fn_cln);")
+            add("rt->try_top = _fn_try;")
+            add("rt->root_top = _fn_root;")
+            add("return " + ret_tmp + ";")
+            return
+
+        if k == "break":
+            let lp = loop_stack[len(loop_stack) - 1]
+            add("thrum_unwind_cleanups(rt, " + lp.cln_v + ");")
+            add("rt->try_top = " + lp.try_v + ";")
+            add("rt->root_top = " + lp.root_v + ";")
+            add("break;")
+            return
+
+        if k == "continue":
+            let lp = loop_stack[len(loop_stack) - 1]
+            add("thrum_unwind_cleanups(rt, " + lp.cln_v + ");")
+            add("rt->try_top = " + lp.try_v + ";")
+            add("rt->root_top = " + lp.root_v + ";")
+            add("continue;")
+            return
+
+        if k == "fail":
+            let fv = emit_expr(n.value, cur_env)
+            add("\{ char* _fm = thrum_vstr_alloc(rt, " + fv + ", false); const char* _im = thrum_intern(rt, _fm); free(_fm); thrum_error(rt, " + line + ", " + col + ", _im, NULL); }")
+            return
+
+        if k == "assert":
+            let cv = emit_expr(n.cond, cur_env)
+            add("if (!thrum_truthy(" + cv + ")) \{")
+            indent += 1
+            if n.msg != nil:
+                let mv = emit_expr(n.msg, cur_env)
+                add("char* _am = thrum_vstr_alloc(rt, " + mv + ", false); size_t _alen = strlen(_am) + 24; char* _abuf = (char*)malloc(_alen); snprintf(_abuf, _alen, \"assertion failed: %s\", _am); const char* _ia = thrum_intern(rt, _abuf); free(_abuf); free(_am); thrum_error(rt, " + line + ", " + col + ", _ia, NULL);")
+            else:
+                add("thrum_error(rt, " + line + ", " + col + ", \"assertion failed\", NULL);")
+            indent -= 1
+            add("}")
+            return
+
+        if k == "with":
+            let wcln = "_wcl_" + str(new_id())
+            add("int " + wcln + " = rt->cleanup_top;")
+            let wenv = "_we_" + str(new_id())
+            add("TEnv* " + wenv + " = thrum_env_new(rt, " + cur_env + ", " + cur_env + "->rel);")
+            let wev = new_tmp("thrum_obj((TObj*)" + wenv + ")")
+            add("(void)" + wev + ";")
+            for cp in n.caps:
+                if cp.name == "gui":
+                    uses_gui = true
+                let na = len(cp.args)
+                var aarg = "NULL"
+                if na > 0:
+                    var avars = []
+                    for a in cp.args:
+                        avars = push(avars, emit_expr(a, cur_env))
+                    let warr = "_wa_" + str(new_id())
+                    add("TVal " + warr + "[" + str(na) + "] = \{" + join(", ", avars) + "};")
+                    aarg = warr
+                let capv = new_tmp("thrum_get_cap(rt, " + c_str_lit(cp.name) + ", " + str(na) + ", " + aarg + ", " + line + ", " + col + ")")
+                add("thrum_def_pin(rt, " + wenv + ", " + c_str_lit(cp.name) + ", " + capv + ");")
+            emit_stmts(n.body, wenv, unit_path)
+            add("thrum_unwind_cleanups(rt, " + wcln + ");")
+            return
+
+        if k == "on":
+            let gfn = emit_thunk(n.cond)
+            let bfn = emit_block_thunk(n.body, unit_path)
+            var mcode = "REACT_RISE"
+            if n.mode == "fall":
+                mcode = "REACT_FALL"
+            elif n.mode == "always":
+                mcode = "REACT_ALWAYS"
+            add("thrum_on(rt, " + cur_env + ", " + gfn + ", " + c_str_lit(n.src) + ", " + mcode + ", " + bfn + ", " + line + ", " + col + ");")
+            return
+
+        if k == "settle":
+            var h_tol = "false"
+            var tol_fn = "NULL"
+            if n.tol != nil:
+                h_tol = "true"
+                tol_fn = emit_thunk(n.tol)
+            add("thrum_settle_begin(rt, " + cur_env + ", " + str(floor(n.maxit)) + ", " + h_tol + ", " + tol_fn + ", " + line + ", " + col + ");")
+            emit_stmts(n.body, cur_env, unit_path)
+            add("thrum_settle_end(rt);")
+            return
+
+        if k == "live":
+            let lenv = "_le_" + str(new_id())
+            add("TEnv* " + lenv + " = " + cur_env + "->rel ? " + cur_env + " : thrum_env_new(rt, " + cur_env + ", true);")
+            let lev = new_tmp("thrum_obj((TObj*)" + lenv + ")")
+            add("(void)" + lev + ";")
+            emit_stmts(n.body, lenv, unit_path)
+            return
+
+        if k == "whatif":
+            let np = len(n.pairs)
+            var names_c = []
+            var vals_c = []
+            for pr in n.pairs:
+                names_c = push(names_c, c_str_lit(pr.name))
+                vals_c = push(vals_c, emit_expr(pr.expr, cur_env))
+            let wn = "_wn_" + str(new_id())
+            let wv = "_wv_" + str(new_id())
+            add("const char* " + wn + "[" + str(np) + "] = \{" + join(", ", names_c) + "};")
+            add("TVal " + wv + "[" + str(np) + "] = \{" + join(", ", vals_c) + "};")
+            let bfn = emit_block_thunk(n.body, unit_path)
+            add("thrum_whatif(rt, " + cur_env + ", " + str(np) + ", " + wn + ", " + wv + ", " + bfn + ", " + line + ", " + col + ");")
+            return
+
+        if k == "why":
+            add("thrum_why(rt, " + cur_env + ", " + c_str_lit(n.name) + ", " + line + ", " + col + ");")
+            return
+
+        if k == "budget":
+            add("thrum_budget(rt, " + cur_env + ", " + c_str_lit(n.name) + ", " + line + ", " + col + ");")
+            return
+
+        if k == "use":
+            if n.path == nil and n.modpath == nil:
+                let alias = n.alias ?? n.name
+                let mv = new_tmp("thrum_get_stdmod(rt, " + c_str_lit(n.name) + ", " + line + ", " + col + ")")
+                add("thrum_def_pin(rt, " + cur_env + ", " + c_str_lit(alias) + ", " + mv + ");")
+                return
+            let rp = ck.resolve_file_path(n, unit_path, stdlib_dir)
+            let mkey = file_keys[rp]
+            var alias = n.alias
+            if alias == nil:
+                if n.modpath != nil:
+                    alias = n.modpath[len(n.modpath) - 1]
+                else:
+                    alias = path.stem(rp)
+            var disp = n.path
+            if n.modpath != nil:
+                disp = join(".", n.modpath)
+            let mv = new_tmp("thrum_get_module(rt, " + c_str_lit(mkey) + ")")
+            add("if (" + mv + ".kind == TV_NIL) \{ _thrum_init_" + mod_fn_id[mkey] + "(rt); " + mv + " = thrum_get_module(rt, " + c_str_lit(mkey) + "); }")
+            add("else if (" + mv + ".kind == TV_BOOL) \{ thrum_error(rt, " + line + ", " + col + ", " + c_str_lit("circular module import '" + str(disp) + "'") + ", NULL); }")
+            add("thrum_def_pin(rt, " + cur_env + ", " + c_str_lit(alias) + ", " + mv + ");")
+            return
+
+    # Map mod_key -> stable C function suffix id (deterministic order from checked.modules)
+    var mod_fn_id = {}
+    for m in checked.modules:
+        mod_fn_id[m.key] = str(m.id)
+        protos = u.buf_push(protos, "static void _thrum_init_" + str(m.id) + "(TRuntime* rt);")
+
+    # Emit each bundled file module
+    for m in checked.modules:
+        let fid = "_thrum_init_" + str(m.id)
+        stmts = u.buf_new()
+        indent = 1
+        loop_stack = []
+        in_fn = false
+        add("T_FRAME(rt);")
+        add("thrum_reg_loading(rt, " + c_str_lit(m.key) + ");")
+        add("TEnv* env = thrum_env_new(rt, rt->builtins, true);")
+        add("T_VAR(rt, _mev, thrum_obj((TObj*)env)); (void)_mev;")
+        emit_stmts(m.parsed.body, "env", m.file_path)
+        add("thrum_reg_module(rt, " + c_str_lit(m.key) + ", env);")
+        add("T_END_FRAME(rt);")
+        let body_c = u.buf_join(stmts, "\n")
+        funcs = u.buf_push(funcs, "static void " + fid + "(TRuntime* rt) \{\n" + body_c + "\n}")
+
+    # Emit main body
+    let entry = checked.entry
+    stmts = u.buf_new()
+    indent = 1
+    loop_stack = []
+    in_fn = false
+    emit_stmts(entry.body, "env", prog_path)
+    let main_body_c = u.buf_join(stmts, "\n")
+
+    # Emit embedded source lines for exact runtime error diagnostics
+    let src_lines = entry.info.lines
+    let n_lines = len(src_lines)
+    var src_arr_code = "static const char* const _thrum_src_lines[] = \{ NULL };"
+    var n_lines_expr = "0"
+    if n_lines > 0:
+        var line_lits = u.buf_new()
+        for ln in src_lines:
+            line_lits = u.buf_push(line_lits, "    " + c_str_lit(ln) + ",")
+        src_arr_code = "static const char* const _thrum_src_lines[" + str(n_lines) + "] = \{\n" + u.buf_join(line_lits, "\n") + "\n};"
+        n_lines_expr = str(n_lines)
+
+    var out = u.buf_new()
+    if uses_gui:
+        out = u.buf_push(out, "/* THRUM_USE_GUI */")
+    out = u.buf_push(out, "/* Generated by self-hosted Thrum compiler (thrumc) */")
+    out = u.buf_push(out, "#include \"thrum_rt.h\"\n")
+    out = u.buf_push(out, src_arr_code + "\n")
+    let proto_str = u.buf_join(protos, "\n")
+    if proto_str != "":
+        out = u.buf_push(out, proto_str + "\n")
+    let funcs_str = u.buf_join(funcs, "\n\n")
+    if funcs_str != "":
+        out = u.buf_push(out, funcs_str + "\n")
+    out = u.buf_push(out, "static void _thrum_main_body(TRuntime* rt, TEnv* env) \{\n    int _fn_root = rt->root_top;\n    (void)_fn_root; (void)env;\n" + main_body_c + "\n}\n")
+    out = u.buf_push(out, "int main(int argc, char** argv) \{\n    TRuntime* rt = thrum_init(argc, argv);\n    rt->prog_path = " + c_str_lit(entry.info.path) + ";\n    rt->prog_lines = _thrum_src_lines;\n    rt->prog_nlines = " + n_lines_expr + ";\n    T_FRAME(rt);\n    _thrum_main_body(rt, rt->globals);\n    T_END_FRAME(rt);\n    thrum_finish(rt);\n    return 0;\n}")
+    return u.buf_join(out, "\n") + "\n"

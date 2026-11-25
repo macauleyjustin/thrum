@@ -1,0 +1,7 @@
+var x = 10
+pin snap = x * 2
+let live_v = x * 2
+with io:
+    x = 25
+    io.say(snap)
+    io.say(live_v)

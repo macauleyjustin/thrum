@@ -1,0 +1,6 @@
+fn id1(x: 1) -> 1:
+    return x
+with io:
+    io.say(5 1/s)
+    io.say(id1(42))
+    io.say([5, 1])

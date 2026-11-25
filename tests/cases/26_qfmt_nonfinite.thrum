@@ -1,0 +1,6 @@
+use math
+with io:
+    io.say(math.inf)
+    io.say(-math.inf)
+    io.say(math.nan)
+    io.say(math.inf * 1 m)

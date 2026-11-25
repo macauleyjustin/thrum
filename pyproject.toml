@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thrum-lang"
+version = "0.2.0"
+description = "Thrum — a reactive, dimension-checked, explainable programming language"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+thrum = "thrum_lang.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["thrum_lang*"]

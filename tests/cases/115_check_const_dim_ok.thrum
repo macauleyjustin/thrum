@@ -1,0 +1,4 @@
+use const
+use std.physics
+fn test_fn() -> s:
+    return physics.orbital_period(const.M_earth, const.R_earth + 400 km)

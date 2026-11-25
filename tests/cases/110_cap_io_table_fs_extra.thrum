@@ -1,0 +1,11 @@
+with io, fs("./sandbox"):
+    fs.mkdir("sub")
+    fs.write_lines("sub/data.txt", ["one", "two"])
+    fs.append("sub/data.txt", "three\n")
+    io.say(fs.is_dir("sub"))
+    io.say(fs.is_file("sub/data.txt"))
+    io.say(fs.read_lines("sub/data.txt"))
+    io.table([{k: "a", v: 1 m}, {k: "b", v: 2 m}])
+    fs.remove("sub/data.txt")
+    fs.remove("sub")
+    io.say(fs.exists("sub"))

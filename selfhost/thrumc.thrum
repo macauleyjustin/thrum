@@ -1,0 +1,549 @@
+use path
+use text
+use units
+use "./util.thrum" as u
+use "./parser.thrum" as p
+use "./checker.thrum" as ck
+use "./codegen_c.thrum" as cg
+
+pin VERSION = "0.2.0"
+
+pin RT_FILES = [
+    "rt_units.c",
+    "rt_core.c",
+    "rt_graph.c",
+    "rt_caps.c",
+    "rt_builtins.c",
+]
+
+pin BUILTIN_DOC_EXPORTS = {
+    path: ["basename", "dirname", "ext", "join", "normalize", "split", "stem"],
+    list: ["chunk", "drop", "flat_map", "group_by", "partition", "sort_by", "take", "window"],
+    map: ["filter_entries", "from_entries", "get", "has", "map_vals", "merge", "omit", "pick"],
+    test: ["approx", "eq", "fails", "neq", "ok", "run", "summary"],
+    json: ["parse", "parse_qty", "stringify", "stringify_qty"],
+    csv: ["parse", "parse_nums", "stringify"],
+    time: ["components", "format_dur", "format_iso", "from_components", "parse_iso"],
+    regex: ["find_all", "match", "replace", "search", "split", "test"],
+    units: ["c2k", "compatible", "convert", "define", "dim_of", "f2k", "k2c", "list", "qty"],
+    stat: ["corr", "cov", "histogram", "iqr", "linfit", "mean", "median", "mode", "normalize", "quantile", "stdev", "variance", "weighted_mean", "zscore"],
+    text: ["chars", "contains", "count", "ends", "format", "index_of", "is_alpha", "is_digit", "join", "lines", "lower", "ltrim", "pad_left", "pad_right", "repeat", "replace", "rtrim", "split", "starts", "title", "trim", "upper", "words"],
+    math: ["acos", "acosh", "arange", "asin", "asinh", "atan", "atan2", "atanh", "clamp", "comb", "cos", "cosh", "cumsum", "deg2rad", "diff", "dot", "e", "exp", "expm1", "factorial", "factors", "gcd", "hypot", "inf", "is_prime", "isfinite", "isinf", "isnan", "lcm", "linspace", "ln", "log", "log10", "log1p", "log2", "nan", "norm", "perm", "phi", "pi", "rad2deg", "sin", "sinh", "tan", "tanh", "tau"],
+    "const": ["F", "G", "L_sun", "M_earth", "M_sun", "NA", "R", "R_earth", "Ry", "T_cmb", "alpha", "atm", "au", "c", "e", "eps0", "g0", "h", "hbar", "kB", "ly", "me", "mn", "mp", "mu0", "muB", "pc", "sigma", "u"],
+}
+
+pin SELFTESTS = [
+    ["units literal", "with io:\n    io.say(5 ft as cm)\n", ["152.4 cm"]],
+    ["dimension error", "let x = 1 m + 1 s\n", ["dimension mismatch"]],
+    ["uncertainty", "with io:\n    io.say(2.0 ± 0.1 m + 3.0 ± 0.2 m)\n", ["5.00 ± 0.22 m"]],
+    ["live relation", "var c = 20\nlet f = c * 9/5 + 32\nwith io:\n    io.say(f)\n    c = 100\n    io.say(f)\n", ["68", "212"]],
+    ["glitch-free diamond", "var a = 1\nlet b = a + 1\nlet c = a * 2\nlet d = b + c\nwith io:\n    io.say(d)\n    a = 10\n    io.say(d)\n", ["4", "31"]],
+    ["settle fixpoint", "var n = 2\nsettle max 60 tol 1e-14:\n    let root = (root + n/root)/2 init 1\nwith io:\n    io.say(round(root, 6))\n    n = 9\n    io.say(round(root, 6))\n", ["1.414214", "3"]],
+    ["reaction edge", "var t = 290 K\nwith io:\n    on t > 300 K rise:\n        io.say(\"hot\")\n    t = 305 K\n    t = 295 K\n    t = 310 K\n", ["hot", "hot"]],
+    ["purity enforced", "var x = 1\nlet y = x + 1\nfn bad(v: num) -> num:\n    x = 99\n    return v\nlet z = bad(x)\n", ["cannot mutate"]],
+    ["dimension types", "fn ke(m: kg, v: m/s) -> J:\n    return 0.5 * m * v^2\nwith io:\n    io.say(ke(2 kg, 3 m/s))\n", ["9 J"]],
+    ["contract", "fn f(x: num) -> num:\n    requires x >= 0, \"need non-negative\"\n    return x\nwith io:\n    io.say(f(-1))\n", ["contract failed"]],
+    ["whatif", "var m = 72 kg\nvar h = 1.8 m\nlet bmi = m / h^2\nwith io:\n    whatif m = 90 kg:\n        io.say(round(bmi, 2))\n    io.say(round(bmi, 2))\n", ["27.78", "22.22"]],
+    ["comprehension + pipe", "let xs = [x^2 for x in 1..6 if x % 2 == 0]\nwith io:\n    io.say(xs |> map(\\it * 2) |> sum())\n", ["112"]],
+    ["match", "let s = \{kind: \"circle\", r: 2}\nmatch s:\n    case \{kind: \"circle\", r}:\n        with io:\n            io.say(round(3.14159 * r^2, 3))\n    case _:\n        with io:\n            io.say(\"no\")\n", ["12.566"]],
+    ["copy-on-write reactivity", "var xs = [1, 2, 3]\nlet total = sum(xs)\nwith io:\n    io.say(total)\n    xs[0] = 10\n    io.say(total)\n", ["6", "15"]],
+    ["capability required", "io.say(\"hi\")\n", ["undefined name 'io'"]],
+    ["codata uncertainty", "use const\nwith io:\n    io.say(const.G)\n", ["6.6743", "±"]],
+]
+
+fn abs_path(p, cwd):
+    if starts(p, "/"):
+        return path.normalize(p)
+    return path.normalize(path.join(cwd, p))
+
+fn find_home(exe_p, cwd, fs_cap, env_cap):
+    var cands = []
+    let eh = env_cap.get("THRUM_HOME")
+    if eh != "":
+        cands = push(cands, abs_path(eh, cwd))
+    let d1 = path.dirname(exe_p)
+    if d1 != "":
+        cands = push(cands, d1)
+        let d2 = path.dirname(d1)
+        if d2 != "":
+            cands = push(cands, d2)
+            let d3 = path.dirname(d2)
+            if d3 != "":
+                cands = push(cands, d3)
+    cands = push(cands, cwd)
+    for c in cands:
+        let rt_h = path.join(c, "runtime", "thrum_rt.h")
+        let std_d = path.join(c, "stdlib")
+        if fs_cap.is_file(rt_h) and fs_cap.is_dir(std_d):
+            return c
+    fail("cannot locate Thrum runtime/ and stdlib/ directory (set THRUM_HOME)")
+
+fn report_err(io_cap, e):
+    if starts(e.message, "__THRUM_DIAG__\n"):
+        io_cap.err(slice(e.message, 15))
+    else:
+        io_cap.err("thrumc: error: " + e.message)
+
+fn emit_trimmed_err(io_cap, s):
+    if not isnil(s) and s != "":
+        var es = s
+        if ends(es, "\n"):
+            es = slice(es, 0, len(es) - 1)
+        io_cap.err(es)
+
+fn compile_src_to_c(src, af, disp_path, home, fs_cap, strict = false):
+    let stdlib_dir = path.join(home, "stdlib")
+    let checked = ck.check_program(src, af, stdlib_dir, fs_cap, disp_path, not strict)
+    return cg.generate_c(checked, af, stdlib_dir)
+
+fn compile_to_c(in_file, cwd, home, fs_cap, strict = false):
+    let af = abs_path(in_file, cwd)
+    if not fs_cap.is_file(af):
+        fail("file not found: " + in_file)
+    let src = fs_cap.read(af)
+    return compile_src_to_c(src, af, in_file, home, fs_cap, strict)
+
+fn compile_to_bin(c_path, out_bin, home, fs_cap, proc_cap, needs_gui = false):
+    let rt_dir = path.join(home, "runtime")
+    let lib_a = path.join(rt_dir, "libthrumrt.a")
+    var cmd = ["cc", "-std=c11", "-O2", "-I" + rt_dir, c_path]
+    if fs_cap.is_file(lib_a):
+        cmd = push(cmd, lib_a)
+    else:
+        for f in RT_FILES:
+            cmd = push(cmd, path.join(rt_dir, f))
+    if needs_gui:
+        let cocoa_o = path.join(rt_dir, "build", "rt_gui_cocoa.o")
+        let cocoa_m = path.join(rt_dir, "rt_gui_cocoa.m")
+        if fs_cap.is_file(cocoa_o):
+            cmd = push(cmd, cocoa_o)
+        elif fs_cap.is_file(cocoa_m):
+            cmd = push(cmd, cocoa_m)
+        else:
+            cmd = push(cmd, path.join(rt_dir, "rt_gui_stub.c"))
+        cmd = push(cmd, "-framework")
+        cmd = push(cmd, "Cocoa")
+    else:
+        let stub_o = path.join(rt_dir, "build", "rt_gui_stub.o")
+        if fs_cap.is_file(stub_o):
+            cmd = push(cmd, stub_o)
+        else:
+            cmd = push(cmd, path.join(rt_dir, "rt_gui_stub.c"))
+    cmd = push(cmd, "-lm")
+    cmd = push(cmd, "-o")
+    cmd = push(cmd, out_bin)
+    return proc_cap.run(cmd)
+
+fn rstrip_spaces(s) -> text:
+    var i = len(s)
+    while i > 0:
+        let c = s[i - 1]
+        if c == " " or c == "\r":
+            i -= 1
+        else:
+            break
+    return slice(s, 0, i)
+
+fn format_source_thrum(src, show_path) -> text:
+    p.parse(src, show_path)
+    var lines = split(replace(src, "\r\n", "\n"), "\n")
+    while len(lines) > 0 and trim(lines[len(lines) - 1]) == "":
+        lines = pop(lines)
+    if len(lines) == 0:
+        return ""
+    var out = u.buf_new()
+    var indent_stack = [0]
+    for raw in lines:
+        let stripped = text.ltrim(raw)
+        if stripped == "":
+            out = u.buf_push(out, "")
+            continue
+        let w = len(raw) - len(stripped)
+        if starts(stripped, "#"):
+            var level = len(indent_stack) - 1
+            for idx in 0..<len(indent_stack):
+                if w <= indent_stack[idx]:
+                    level = idx
+                    break
+            out = u.buf_push(out, ("    " * level) + rstrip_spaces(stripped))
+            continue
+        if w > indent_stack[len(indent_stack) - 1]:
+            indent_stack = push(indent_stack, w)
+        else:
+            while len(indent_stack) > 1 and w < indent_stack[len(indent_stack) - 1]:
+                indent_stack = pop(indent_stack)
+        let level = len(indent_stack) - 1
+        out = u.buf_push(out, ("    " * level) + rstrip_spaces(stripped))
+    return u.buf_join(out, "\n") + "\n"
+
+fn ann_str(ann) -> text:
+    if ann == nil:
+        return ""
+    if ann.kind == "kind":
+        return ann.name
+    if ann.kind == "dim":
+        return ann.sym
+    if ann.kind == "record":
+        return ann.full
+    return ""
+
+fn extract_file_docs(src, title) -> text:
+    let parsed = p.parse(src, title)
+    let lines = parsed.info.lines
+    var out = [title, "=" * len(title)]
+    for st in parsed.body:
+        if st.kind != "fndecl" and st.kind != "record" and st.kind != "decl":
+            continue
+        if st.site == nil:
+            continue
+        let ln = st.site.line - 1
+        var dl = []
+        var i = ln - 1
+        while i >= 0 and starts(trim(lines[i]), "#"):
+            var t = trim(lines[i])
+            while starts(t, "#"):
+                t = slice(t, 1)
+            dl = push(dl, trim(t))
+            i -= 1
+        var rdl = []
+        var j = len(dl) - 1
+        while j >= 0:
+            rdl = push(rdl, dl[j])
+            j -= 1
+        let doc = join(" ", rdl)
+        var sig = ""
+        if st.kind == "fndecl":
+            var ps = []
+            for prm in st.params:
+                var item = prm.name
+                let as_s = ann_str(prm.type)
+                if as_s != "":
+                    item = item + ": " + as_s
+                if prm.default != nil:
+                    item = item + " = ..."
+                ps = push(ps, item)
+            var ret = ""
+            let rs = ann_str(st.ret)
+            if rs != "":
+                ret = " -> " + rs
+            sig = "fn " + st.name + "(" + join(", ", ps) + ")" + ret
+        elif st.kind == "record":
+            var fs = []
+            for fd in st.fields:
+                var item = fd.name
+                let as_s = ann_str(fd.type)
+                if as_s != "":
+                    item = item + ": " + as_s
+                fs = push(fs, item)
+            sig = "record " + st.name + r" { " + join(", ", fs) + r" }"
+        else:
+            sig = st.kw + " " + st.name + " = " + trim(st.src ?? "")
+        out = push(out, "  " + sig)
+        if doc != "":
+            out = push(out, "      " + doc)
+    return join("\n", out) + "\n"
+
+fn collect_test_files(target_abs, fs_cap):
+    if fs_cap.is_file(target_abs):
+        return [target_abs]
+    var out = []
+    fn walk(dir_p):
+        for entry in sort(fs_cap.list(dir_p)):
+            let cp = path.join(dir_p, entry)
+            if fs_cap.is_dir(cp):
+                walk(cp)
+            elif ends(entry, "_test.thrum"):
+                out = push(out, cp)
+    if fs_cap.is_dir(target_abs):
+        walk(target_abs)
+    return out
+
+fn run_compiled_src(src, af, disp_name, run_args, tmp_dir, home, fs_cap, proc_cap, clock_cap, strict = false):
+    let stem = ".thrumc_run_" + str(floor(bare(clock_cap.mono()) * 1000000))
+    let tmp_c = path.join(tmp_dir, stem + ".c")
+    let tmp_bin = path.join(tmp_dir, stem)
+    try:
+        let c_code = compile_src_to_c(src, af, disp_name, home, fs_cap, strict)
+        let needs_gui = starts(c_code, "/* THRUM_USE_GUI */")
+        fs_cap.write(tmp_c, c_code)
+        let cr = compile_to_bin(tmp_c, tmp_bin, home, fs_cap, proc_cap, needs_gui)
+        if fs_cap.exists(tmp_c):
+            fs_cap.remove(tmp_c)
+        if cr.code != 0:
+            if fs_cap.exists(tmp_bin):
+                fs_cap.remove(tmp_bin)
+            return {ok: false, code: cr.code, out: "", err: cr.stderr ?? ""}
+        let rr = proc_cap.run([tmp_bin] + run_args)
+        if fs_cap.exists(tmp_bin):
+            fs_cap.remove(tmp_bin)
+        return {ok: rr.code == 0, code: rr.code, out: rr.stdout ?? "", err: rr.stderr ?? ""}
+    catch e:
+        if fs_cap.exists(tmp_c):
+            try:
+                fs_cap.remove(tmp_c)
+            catch _e1:
+                nil
+        if fs_cap.exists(tmp_bin):
+            try:
+                fs_cap.remove(tmp_bin)
+            catch _e2:
+                nil
+        var em = e.message
+        if starts(em, "__THRUM_DIAG__\n"):
+            em = slice(em, 15)
+        return {ok: false, code: 1, out: "", err: em}
+
+fn main():
+    with io, args, env, fs("/"), proc, clock:
+        let av = args.all()
+        if len(av) == 0:
+            io.say("usage: thrumc <build|emit-c|run|check|fmt|doc|units|test|version> [file] [options]")
+            proc.exit(0)
+        let sub = av[0]
+        if sub == "version":
+            io.say("thrum " + VERSION)
+            proc.exit(0)
+
+        let cwd = proc.cwd()
+        let home = find_home(proc.exe(), cwd, fs, env)
+        let rest = av[1:]
+
+        if sub == "units":
+            var q = nil
+            if len(rest) > 0:
+                q = rest[0]
+            let all_u = sort(uniq(units.list()))
+            for sym in all_u:
+                if q == nil or (q in sym):
+                    let v = qty(1, sym)
+                    let ds = dim(v)
+                    let sc = bare(v)
+                    io.say(text.pad_right(sym, 12) + " " + text.pad_right(ds, 22) + " scale=" + fmt(sc))
+            proc.exit(0)
+
+        if sub == "fmt":
+            if len(rest) < 1:
+                io.err("usage: thrumc fmt <file> [--write | --check]")
+                proc.exit(1)
+            let f = rest[0]
+            let af = abs_path(f, cwd)
+            var write_back = false
+            var check_only = false
+            for idx in 1..<len(rest):
+                if rest[idx] == "--write" or rest[idx] == "-w":
+                    write_back = true
+                elif rest[idx] == "--check":
+                    check_only = true
+            try:
+                if not fs.is_file(af):
+                    io.err("file not found: " + f)
+                    proc.exit(1)
+                let src = fs.read(af)
+                let formatted = format_source_thrum(src, f)
+                if check_only:
+                    if formatted != src:
+                        io.err(f + ": would reformat")
+                        proc.exit(1)
+                    proc.exit(0)
+                if write_back:
+                    fs.write(af, formatted)
+                else:
+                    io.print(formatted)
+                proc.exit(0)
+            catch e:
+                report_err(io, e)
+                proc.exit(1)
+
+        if sub == "doc":
+            if len(rest) < 1:
+                io.err("usage: thrumc doc <module|file>")
+                proc.exit(1)
+            let target = rest[0]
+            if target in BUILTIN_DOC_EXPORTS:
+                let title = "module " + target
+                io.say(title)
+                io.say("=" * len(title))
+                for sym in BUILTIN_DOC_EXPORTS[target]:
+                    io.say("  " + text.pad_right(sym, 18) + " <builtin " + target + "." + sym + ">")
+                proc.exit(0)
+            var file_t = target
+            if starts(target, "std."):
+                file_t = path.join(home, "stdlib", slice(target, 4) + ".thrum")
+            else:
+                file_t = abs_path(target, cwd)
+            try:
+                if not fs.is_file(file_t):
+                    io.err("doc error: cannot find target '" + target + "'")
+                    proc.exit(1)
+                let src = fs.read(file_t)
+                io.print(extract_file_docs(src, target))
+                proc.exit(0)
+            catch e:
+                report_err(io, e)
+                proc.exit(1)
+
+        if sub == "test":
+            var tmp_dir = env.get("TMPDIR")
+            if tmp_dir == "":
+                tmp_dir = cwd
+            if len(rest) > 0:
+                let tgt = abs_path(rest[0], cwd)
+                let files = collect_test_files(tgt, fs)
+                if len(files) == 0:
+                    io.say("no *_test.thrum files found in " + rest[0])
+                    proc.exit(1)
+                var ok_cnt = 0
+                for tf in files:
+                    let src = fs.read(tf)
+                    let res = run_compiled_src(src, tf, tf, [], tmp_dir, home, fs, proc, clock, false)
+                    if res.ok:
+                        io.say("  ok   " + tf)
+                        ok_cnt += 1
+                    else:
+                        io.say("  FAIL " + tf)
+                        emit_trimmed_err(io, res.err)
+                io.say("\n" + str(ok_cnt) + "/" + str(len(files)) + " test files passed")
+                if ok_cnt == len(files):
+                    proc.exit(0)
+                proc.exit(1)
+            var passed = 0
+            for tc in SELFTESTS:
+                let nm = tc[0]
+                let tsrc = tc[1]
+                let expects = tc[2]
+                let sf = path.join(tmp_dir, ".thrumc_st.thrum")
+                let res = run_compiled_src(tsrc, sf, "<test>", [], tmp_dir, home, fs, proc, clock, false)
+                let got = res.out + res.err
+                var match_ok = true
+                for ex in expects:
+                    if not (ex in got):
+                        match_ok = false
+                if match_ok:
+                    io.say("  ok   " + nm)
+                    passed += 1
+                else:
+                    io.say("  FAIL " + nm + "\n       got " + repr(got))
+            io.say("\n" + str(passed) + "/" + str(len(SELFTESTS)) + " passed")
+            if passed == len(SELFTESTS):
+                proc.exit(0)
+            proc.exit(1)
+
+        if sub == "check":
+            if len(rest) < 1:
+                io.err("usage: thrumc check <file>")
+                proc.exit(1)
+            let f = rest[0]
+            let af = abs_path(f, cwd)
+            try:
+                if not fs.is_file(af):
+                    io.err("file not found: " + f)
+                    proc.exit(1)
+                let src = fs.read(af)
+                ck.check_program(src, af, path.join(home, "stdlib"), fs, f)
+                io.say(f + ": ok")
+                proc.exit(0)
+            catch e:
+                report_err(io, e)
+                proc.exit(1)
+
+        if sub == "emit-c":
+            if len(rest) < 1:
+                io.err("usage: thrumc emit-c <file> [-o out.c] [--strict]")
+                proc.exit(1)
+            let f = rest[0]
+            var out_c = path.stem(f) + ".c"
+            var strict = false
+            var i = 1
+            while i < len(rest):
+                if rest[i] == "-o" and i + 1 < len(rest):
+                    out_c = rest[i + 1]
+                    i += 2
+                elif rest[i] == "--strict":
+                    strict = true
+                    i += 1
+                else:
+                    i += 1
+            try:
+                let c_code = compile_to_c(f, cwd, home, fs, strict)
+                if out_c == "-":
+                    io.print(c_code)
+                else:
+                    fs.write(abs_path(out_c, cwd), c_code)
+                proc.exit(0)
+            catch e:
+                report_err(io, e)
+                proc.exit(1)
+
+        if sub == "build":
+            if len(rest) < 1:
+                io.err("usage: thrumc build <file> [-o out] [--keep-c] [--strict]")
+                proc.exit(1)
+            let f = rest[0]
+            var out_bin = path.stem(f)
+            var keep_c = false
+            var strict = false
+            var i = 1
+            while i < len(rest):
+                if rest[i] == "-o" and i + 1 < len(rest):
+                    out_bin = rest[i + 1]
+                    i += 2
+                elif rest[i] == "--keep-c":
+                    keep_c = true
+                    i += 1
+                elif rest[i] == "--strict":
+                    strict = true
+                    i += 1
+                else:
+                    i += 1
+            let out_abs = abs_path(out_bin, cwd)
+            let tmp_c = out_abs + ".thrumc.c"
+            try:
+                let c_code = compile_to_c(f, cwd, home, fs, strict)
+                let needs_gui = starts(c_code, "/* THRUM_USE_GUI */")
+                fs.write(tmp_c, c_code)
+                let cr = compile_to_bin(tmp_c, out_abs, home, fs, proc, needs_gui)
+                if not keep_c and fs.exists(tmp_c):
+                    fs.remove(tmp_c)
+                if cr.code != 0:
+                    emit_trimmed_err(io, cr.stderr)
+                    proc.exit(cr.code)
+                proc.exit(0)
+            catch e:
+                if fs.exists(tmp_c):
+                    try:
+                        fs.remove(tmp_c)
+                    catch _e:
+                        nil
+                report_err(io, e)
+                proc.exit(1)
+
+        if sub == "run":
+            if len(rest) < 1:
+                io.err("usage: thrumc run <file> [--strict] [-- args...]")
+                proc.exit(1)
+            let f = rest[0]
+            var strict = false
+            var run_args = rest[1:]
+            if len(run_args) > 0 and run_args[0] == "--strict":
+                strict = true
+                run_args = run_args[1:]
+            var tmp_dir = env.get("TMPDIR")
+            if tmp_dir == "":
+                tmp_dir = path.dirname(abs_path(f, cwd))
+                if tmp_dir == "":
+                    tmp_dir = cwd
+            let af = abs_path(f, cwd)
+            if not fs.is_file(af):
+                io.err("thrumc: error: file not found: " + f)
+                proc.exit(1)
+            let src = fs.read(af)
+            let res = run_compiled_src(src, af, f, run_args, tmp_dir, home, fs, proc, clock, strict)
+            if res.out != "":
+                io.print(res.out)
+            emit_trimmed_err(io, res.err)
+            proc.exit(res.code)
+
+        io.err("unknown subcommand '" + sub + "'")
+        proc.exit(1)
+
+main()

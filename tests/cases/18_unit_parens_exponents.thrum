@@ -1,0 +1,6 @@
+with io:
+    io.say(5 m^3/(kg*s^2))
+    io.say(2 m^(-2))
+    io.say(si(2 m^(-2)))
+    io.say(4 m^(1/2))
+    io.say((9 m^2)^0.5)

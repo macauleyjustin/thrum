@@ -1,0 +1,5 @@
+with io:
+    io.say(0xFF)
+    io.say(0b1010_0101)
+    io.say(1_000_000)
+    io.say(1.5e-3)

@@ -1,0 +1,3 @@
+31_neg_frac_power_error.thrum:1:10: error: negative base with fractional exponent
+      1 | let x = (-4) ^ 0.5
+        |          ^

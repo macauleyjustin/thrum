@@ -1,0 +1,12 @@
+use time
+use path
+let ts = time.parse_iso("2026-01-15T08:30:05Z")
+let c = time.components(ts)
+with io:
+    io.say(time.format_iso(ts))
+    io.say(time.format_dur(90065 s))
+    io.say("{c.year}-{c.month}-{c.day}")
+    io.say(time.format_iso(time.from_components(2026, 3, 1, 12, 0, 0)))
+    io.say(path.join("a", "b", "file.thrum"))
+    io.say("{path.stem("dir/file.thrum")} {path.ext("dir/file.thrum")}")
+    io.say(path.normalize("a/b/../c"))

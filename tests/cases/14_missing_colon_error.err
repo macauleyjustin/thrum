@@ -1,0 +1,3 @@
+14_missing_colon_error.thrum:1:14: error: expected OP ':' but found NEWLINE
+      1 | for i in 1..3
+        |              ^

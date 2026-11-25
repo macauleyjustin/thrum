@@ -1,0 +1,9 @@
+let xs = [10, 20, 30, 40, 50]
+let s = "thrum"
+with io:
+    io.say(xs[1:4])
+    io.say(xs[:2])
+    io.say(xs[3:])
+    io.say(xs[::-1])
+    io.say(s[1:4])
+    io.say(s[::2])

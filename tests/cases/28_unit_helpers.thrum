@@ -1,0 +1,13 @@
+use units
+units.define("smoot", 1.7018, "m")
+with io:
+    let q = 5 ± 0.2 ft
+    io.say(unit(q))
+    io.say(dim(q))
+    io.say(unc(q))
+    io.say(bare(q))
+    io.say(si(q))
+    io.say(exact(q))
+    io.say(with_unc(10 m, 0.5 m))
+    io.say(qty(2, "smoot") as m)
+    io.say(convert(1 m, "cm"))

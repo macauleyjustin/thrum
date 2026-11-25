@@ -1,0 +1,3 @@
+93_check_static_dim_return_error.thrum:2:5: error: return of ke should have dimension J, got m*kg/s
+      2 |     return m * v
+        |     ^

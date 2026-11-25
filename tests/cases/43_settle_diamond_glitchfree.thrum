@@ -1,0 +1,9 @@
+var n = 4
+settle max 60 tol 1e-14:
+    let root = (root + n / root) / 2 init 1
+let dbl = n * 2
+let comb = round(root, 4) + dbl
+with io:
+    io.say(comb)
+    n = 9
+    io.say(comb)

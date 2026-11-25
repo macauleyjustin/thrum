@@ -1,0 +1,9 @@
+let m = {"a\nb": 42, "q\"k": 7}
+let tag = "a\nb"
+match tag:
+    case "a\nb":
+        with io:
+            io.say(m["a\nb"])
+            io.say("nested={m["q\"k"]}")
+            io.say("brace=\{ok\}")
+            io.say("slash=\\")

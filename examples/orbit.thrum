@@ -1,0 +1,18 @@
+use const
+use math
+
+fn period(m: kg, r: m) -> s:
+    requires m > 0 kg, "central mass must be positive"
+    requires r > 0 m
+    return 2 * math.pi * sqrt(r^3 / (const.G * m))
+
+var altitude = 400 ± 5 km
+let radius   = 6371 km + altitude
+let T        = period(5.972e24 kg, radius)
+
+with io:
+    io.say("ISS altitude {altitude}, radius {radius}")
+    io.say("period {T as min}")
+    budget T
+    altitude = 420 km            # T recomputes itself
+    io.say("boosted -> {T as min}")

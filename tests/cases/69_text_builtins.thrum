@@ -1,0 +1,11 @@
+with io:
+    io.say(split("a,b,c", ","))
+    io.say(join("-", ["a", "b", "c"]))
+    io.say(upper("Abc"))
+    io.say(lower("AbC"))
+    io.say(trim("  hi  "))
+    io.say(replace("foo bar", "bar", "baz"))
+    io.say(starts("thrum", "th"))
+    io.say(ends("thrum", "um"))
+    io.say(repr("x"))
+    io.say(type(true))

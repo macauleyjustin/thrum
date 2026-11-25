@@ -1,0 +1,351 @@
+use "./util.thrum" as u
+use "./units.thrum" as un
+
+pin KEYWORDS = {
+    "var": true, "let": true, "pin": true, "fn": true, "return": true,
+    "if": true, "elif": true, "else": true, "for": true, "while": true,
+    "repeat": true, "in": true, "match": true, "case": true, "try": true,
+    "catch": true, "fail": true, "assert": true, "with": true, "on": true,
+    "settle": true, "live": true, "whatif": true, "why": true, "budget": true,
+    "use": true, "as": true, "not": true, "and": true, "or": true,
+    "break": true, "continue": true, "true": true, "false": true, "nil": true,
+}
+
+pin OP3 = {"+/-": true, "..<": true}
+pin OP2 = {
+    "|>": true, "??": true, "->": true, "..": true, "==": true, "!=": true,
+    "<=": true, ">=": true, "+=": true, "-=": true, "*=": true, "/=": true,
+    "^=": true, "%=": true,
+}
+pin OP1 = {
+    "±": true, "+": true, "-": true, "*": true, "/": true, "^": true, "%": true,
+    "<": true, ">": true, "=": true, "(": true, ")": true, "[": true, "]": true,
+    r"{": true, "}": true, ",": true, ":": true, ".": true, "~": true, "\\": true,
+    ";": true,
+}
+pin OPEN_DELIM = {"(": true, "[": true, r"{": true}
+pin CLOSE_DELIM = {")": true, "]": true, "}": true}
+pin HEX_VALS = {
+    "0": 0, "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9,
+    "a": 10, "b": 11, "c": 12, "d": 13, "e": 14, "f": 15,
+    "A": 10, "B": 11, "C": 12, "D": 13, "E": 14, "F": 15,
+}
+
+fn _match_num(src, chars, n, i):
+    if i >= n or not (chars[i] in u.DIGIT_SET):
+        return nil
+    # Hex 0x...
+    if chars[i] == "0" and i + 1 < n and (chars[i + 1] == "x" or chars[i + 1] == "X"):
+        if i + 2 < n and (chars[i + 2] in u.HEX_SET or chars[i + 2] == "_"):
+            var j = i + 2
+            var val = 0.0
+            var has_d = false
+            while j < n and (chars[j] in u.HEX_SET or chars[j] == "_"):
+                if chars[j] != "_":
+                    val = val * 16 + HEX_VALS[chars[j]]
+                    has_d = true
+                j += 1
+            if has_d:
+                return {val: val, end: j}
+    # Binary 0b...
+    if chars[i] == "0" and i + 1 < n and (chars[i + 1] == "b" or chars[i + 1] == "B"):
+        if i + 2 < n and (chars[i + 2] in u.BIN_SET or chars[i + 2] == "_"):
+            var j = i + 2
+            var val = 0.0
+            var has_d = false
+            while j < n and (chars[j] in u.BIN_SET or chars[j] == "_"):
+                if chars[j] != "_":
+                    val = val * 2 + num(chars[j])
+                    has_d = true
+                j += 1
+            if has_d:
+                return {val: val, end: j}
+    # Decimal / Float / Sci
+    var j = i
+    while j < n and (chars[j] in u.DIGIT_SET or chars[j] == "_"):
+        j += 1
+    if j + 1 < n and chars[j] == "." and chars[j + 1] in u.DIGIT_SET:
+        j += 1
+        while j < n and (chars[j] in u.DIGIT_SET or chars[j] == "_"):
+            j += 1
+    if j < n and (chars[j] == "e" or chars[j] == "E"):
+        var ek = j + 1
+        if ek < n and (chars[ek] == "+" or chars[ek] == "-"):
+            ek += 1
+        if ek < n and chars[ek] in u.DIGIT_SET:
+            ek += 1
+            while ek < n and chars[ek] in u.DIGIT_SET:
+                ek += 1
+            j = ek
+    let raw = replace(slice(src, i, j), "_", "")
+    return {val: num(raw), end: j}
+
+fn lex(src, path = "<input>"):
+    let info = u.make_src_info(src, path)
+    let chars = info.chars
+    let n = len(chars)
+    var toks = u.buf_new()
+    var indents = [0]
+    var i = 0
+    var line = 1
+    var col = 1
+    var depth = 0
+    var ls = true
+
+    while i < n:
+        if ls and depth == 0:
+            var j = i
+            var w = 0
+            while j < n and (chars[j] == " " or chars[j] == "\t"):
+                if chars[j] == "\t":
+                    u.diag_err(info, {line: line, col: 1}, "tabs are not allowed for indentation", "use spaces")
+                w += 1
+                j += 1
+            if j < n and chars[j] == "#":
+                while j < n and chars[j] != "\n":
+                    j += 1
+            if j >= n or chars[j] == "\n":
+                if j < n:
+                    j += 1
+                    line += 1
+                    col = 1
+                i = j
+                continue
+            let top_w = indents[len(indents) - 1]
+            if w > top_w:
+                indents = push(indents, w)
+                toks = u.buf_push(toks, {kind: "INDENT", val: w, line: line, col: 1, start: i, end: j})
+            else:
+                while w < indents[len(indents) - 1]:
+                    indents = pop(indents)
+                    toks = u.buf_push(toks, {kind: "DEDENT", val: w, line: line, col: 1, start: i, end: j})
+                if w != indents[len(indents) - 1]:
+                    u.diag_err(info, {line: line, col: 1}, "inconsistent indentation")
+            i = j
+            col = w + 1
+            ls = false
+            continue
+
+        let c = chars[i]
+        if c == "\n":
+            if depth == 0:
+                toks = u.buf_push(toks, {kind: "NEWLINE", val: nil, line: line, col: col, start: i, end: i + 1})
+                ls = true
+            i += 1
+            line += 1
+            col = 1
+            continue
+        if c == " " or c == "\t" or c == "\r":
+            i += 1
+            col += 1
+            continue
+        if c == "#":
+            while i < n and chars[i] != "\n":
+                i += 1
+            continue
+
+        let start = i
+        let sl = line
+        let sc = col
+
+        # Raw text: r"..." / r'...' / r"""...""" / r'''...'''
+        if (c == "r" or c == "R") and i + 1 < n and (chars[i + 1] == "\"" or chars[i + 1] == "'"):
+            let q = chars[i + 1]
+            let triple = (i + 3 < n and chars[i + 2] == q and chars[i + 3] == q)
+            var tlen = 1
+            if triple:
+                tlen = 3
+            var j = i + 1 + tlen
+            var tb = u.buf_new()
+            while j < n:
+                if triple:
+                    if j + 2 < n and chars[j] == q and chars[j + 1] == q and chars[j + 2] == q:
+                        break
+                elif chars[j] == q:
+                    break
+                if chars[j] == "\n":
+                    line += 1
+                tb = u.buf_push(tb, chars[j])
+                j += 1
+            if j >= n:
+                u.diag_err(info, {line: sl, col: sc}, "unterminated raw text literal")
+            j += tlen
+            toks = u.buf_push(toks, {kind: "RAWTEXT", val: u.str_buf_join(tb), line: sl, col: sc, start: start, end: j})
+            col += j - i
+            i = j
+            continue
+
+        # Text: "..." / '...' / """...""" / '''...'''
+        if c == "\"" or c == "'":
+            let q = c
+            let triple = (i + 2 < n and chars[i + 1] == q and chars[i + 2] == q)
+            var tlen = 1
+            if triple:
+                tlen = 3
+            var j = i + tlen
+            var tb = u.buf_new()
+            while j < n:
+                if triple:
+                    if j + 2 < n and chars[j] == q and chars[j + 1] == q and chars[j + 2] == q:
+                        break
+                elif chars[j] == q:
+                    break
+                if chars[j] == "\\" and j + 1 < n:
+                    if chars[j + 1] == "\n":
+                        line += 1
+                    tb = u.buf_push(tb, "\\" + chars[j + 1])
+                    j += 2
+                    continue
+                if chars[j] == r"{":
+                    tb = u.buf_push(tb, r"{")
+                    j += 1
+                    var bdepth = 1
+                    var iq = nil
+                    while j < n and bdepth > 0:
+                        let ch = chars[j]
+                        if iq != nil:
+                            if ch == "\\" and j + 1 < n:
+                                if chars[j + 1] == "\n":
+                                    line += 1
+                                tb = u.buf_push(tb, "\\" + chars[j + 1])
+                                j += 2
+                                continue
+                            if ch == iq:
+                                iq = nil
+                        elif ch == "\"" or ch == "'":
+                            iq = ch
+                        elif ch == r"{":
+                            bdepth += 1
+                        elif ch == "}":
+                            bdepth -= 1
+                        if ch == "\n":
+                            line += 1
+                        tb = u.buf_push(tb, ch)
+                        j += 1
+                    if bdepth > 0:
+                        u.diag_err(info, {line: sl, col: sc}, r"unterminated '{' in text")
+                    continue
+                if chars[j] == "\n":
+                    line += 1
+                tb = u.buf_push(tb, chars[j])
+                j += 1
+            if j >= n:
+                u.diag_err(info, {line: sl, col: sc}, "unterminated text literal")
+            j += tlen
+            toks = u.buf_push(toks, {kind: "TEXT", val: u.str_buf_join(tb), line: sl, col: sc, start: start, end: j})
+            col += j - i
+            i = j
+            continue
+
+        # Number / quantity literal
+        if c in u.DIGIT_SET:
+            let nm = _match_num(src, chars, n, i)
+            var val = nm.val
+            var j = nm.end
+            var unc = 0.0
+            # Uncertainty +/- or ±
+            var uj = j
+            while uj < n and (chars[uj] == " " or chars[uj] == "\t"):
+                uj += 1
+            var matched_u = false
+            if uj < n and chars[uj] == "±":
+                uj += 1
+                matched_u = true
+            elif uj + 2 < n and chars[uj] == "+" and chars[uj + 1] == "/" and chars[uj + 2] == "-":
+                uj += 3
+                matched_u = true
+            if matched_u:
+                while uj < n and (chars[uj] == " " or chars[uj] == "\t"):
+                    uj += 1
+                let nm2 = _match_num(src, chars, n, uj)
+                if nm2 != nil:
+                    unc = nm2.val
+                    j = nm2.end
+
+            # Optional unit suffix
+            var k = j
+            while k < n and (chars[k] == " " or chars[k] == "\t"):
+                k += 1
+            var disp = nil
+            var r = nil
+            if k < n and chars[k] != "\n":
+                if chars[k] == "1":
+                    if k + 1 < n and chars[k + 1] == "/":
+                        r = un.scan_unit_chars(src, chars, n, k)
+                elif chars[k] != "(":
+                    r = un.scan_unit_chars(src, chars, n, k)
+                if r != nil and chars[k] in u.UNIT_START_SET:
+                    var wk = k + 1
+                    while wk < n and chars[wk] in u.UNIT_CONT_SET:
+                        wk += 1
+                    let lead = slice(src, k, wk)
+                    if lead in KEYWORDS:
+                        r = nil
+            var qdim = un.D0
+            if r != nil:
+                let sym = slice(src, k, r.end)
+                disp = {sc: r.sc, sym: sym}
+                qdim = r.dim
+                val = val * r.sc
+                unc = unc * r.sc
+                j = r.end
+            toks = u.buf_push(toks, {kind: "QTY", val: {v: val, u: unc, disp: disp, dim: qdim}, line: line, col: sc, start: start, end: j})
+            col += j - i
+            i = j
+            continue
+
+        # Identifiers & keywords
+        if c in u.ALPHA_SET:
+            var j = i + 1
+            while j < n and chars[j] in u.IDENT_SET:
+                j += 1
+            let w = slice(src, i, j)
+            var tkind = "NAME"
+            if w in KEYWORDS:
+                tkind = "KW"
+            toks = u.buf_push(toks, {kind: tkind, val: w, line: line, col: sc, start: start, end: j})
+            col += j - i
+            i = j
+            continue
+
+        if c == ";":
+            toks = u.buf_push(toks, {kind: "NEWLINE", val: nil, line: line, col: sc, start: i, end: i + 1})
+            i += 1
+            col += 1
+            continue
+
+        # Operators (longest-first: 3, 2, 1)
+        var op = nil
+        if i + 3 <= n:
+            let s3 = slice(src, i, i + 3)
+            if s3 in OP3:
+                op = s3
+        if op == nil and i + 2 <= n:
+            let s2 = slice(src, i, i + 2)
+            if s2 in OP2:
+                op = s2
+        if op == nil and c in OP1:
+            op = c
+        if op != nil:
+            let olen = len(op)
+            toks = u.buf_push(toks, {kind: "OP", val: op, line: line, col: sc, start: start, end: i + olen})
+            if op in OPEN_DELIM:
+                depth += 1
+            elif op in CLOSE_DELIM:
+                depth -= 1
+                if depth < 0:
+                    depth = 0
+            i += olen
+            col += olen
+            continue
+
+        u.diag_err(info, {line: line, col: sc}, "unexpected character " + repr(c))
+
+    let ltok = u.buf_last(toks)
+    if ltok != nil and ltok.kind != "NEWLINE":
+        toks = u.buf_push(toks, {kind: "NEWLINE", val: nil, line: line, col: col, start: n, end: n})
+    while len(indents) > 1:
+        indents = pop(indents)
+        toks = u.buf_push(toks, {kind: "DEDENT", val: 0, line: line, col: col, start: n, end: n})
+    toks = u.buf_push(toks, {kind: "EOF", val: nil, line: line, col: col, start: n, end: n})
+    return {toks: u.buf_list(toks), info: info}

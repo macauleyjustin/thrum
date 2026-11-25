@@ -1,0 +1,8 @@
+var n = 2
+settle max 60 tol 1e-14:
+    let root = (root + n/root)/2 init 1
+
+with io:
+    io.say("sqrt({n}) = {root}")
+    n = 144
+    io.say("sqrt({n}) = {root}")

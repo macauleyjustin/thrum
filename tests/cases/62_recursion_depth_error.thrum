@@ -1,0 +1,3 @@
+fn inf_rec(n):
+    return inf_rec(n + 1)
+let x = inf_rec(0)

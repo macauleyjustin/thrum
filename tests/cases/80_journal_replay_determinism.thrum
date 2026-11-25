@@ -1,0 +1,4 @@
+with io, clock, rand:
+    io.say(clock.now())
+    io.say(rand.float())
+    io.say(rand.int(1, 1000))

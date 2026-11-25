@@ -1,0 +1,9 @@
+use json
+let obj = json.parse(r'{"name": "thrum", "nums": [1, 2.5], "ok": true}')
+let q = 72 ± 0.5 kg
+let raw_q = json.stringify_qty(q)
+let back_q = json.parse_qty(raw_q)
+with io:
+    io.say("{obj.name} {obj.nums} {obj.ok}")
+    io.say(json.stringify({a: 10 m, b: "ok"}))
+    io.say("{back_q} dim={dim(back_q)}")

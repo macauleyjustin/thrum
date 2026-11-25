@@ -1,0 +1,4 @@
+92_check_static_dim_add_error.thrum:2:12: error: dimension mismatch: m + s
+      2 |     return 1 m + 1 s
+        |            ^
+  hint: convert with 'as', or check your units — Thrum never guesses

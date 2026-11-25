@@ -1,0 +1,7 @@
+var m = 72 kg
+var h = 1.8 m
+let bmi = m / h^2
+with io:
+    whatif m = 90 kg, h = 1.5 m:
+        io.say(round(bmi, 2))
+    io.say(round(bmi, 2))

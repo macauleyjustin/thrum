@@ -1,0 +1,3 @@
+var rate = 0.08
+fn tax(amount: num) -> num:
+    return amount * rate

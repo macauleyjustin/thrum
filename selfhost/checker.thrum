@@ -1,0 +1,885 @@
+use path
+use "./util.thrum" as u
+use "./units.thrum" as un
+use "./parser.thrum" as p
+
+pin BUILTIN_SET = {
+    "len": true, "type": true, "str": true, "repr": true, "num": true,
+    "bool": true, "isnil": true, "range": true, "list": true, "keys": true,
+    "vals": true, "items": true, "push": true, "pop": true, "concat": true,
+    "slice": true, "reverse": true, "sort": true, "uniq": true, "flatten": true,
+    "zip": true, "enumerate": true, "map": true, "filter": true, "find": true,
+    "count": true, "reduce": true, "any": true, "all": true, "sum": true,
+    "product": true, "min": true, "max": true, "mean": true, "median": true,
+    "stdev": true, "abs": true, "sqrt": true, "sign": true, "floor": true,
+    "ceil": true, "round": true, "clamp": true, "lerp": true, "approx": true,
+    "unit": true, "dim": true, "unc": true, "bare": true, "si": true,
+    "exact": true, "with_unc": true, "qty": true, "convert": true, "c2k": true,
+    "k2c": true, "split": true, "join": true, "upper": true, "lower": true,
+    "trim": true, "replace": true, "starts": true, "ends": true, "fix": true,
+    "fmt": true, "fail": true,
+}
+
+pin CAPS_LIST = ["args", "clock", "env", "fs", "gui", "io", "proc", "rand", "tty"]
+pin CAPS_SET = {
+    "io": true, "clock": true, "rand": true, "fs": true,
+    "gui": true, "env": true, "args": true, "tty": true, "proc": true,
+}
+
+pin BUILTIN_MODS_LIST = [
+    "csv", "json", "list", "map", "math", "path", "regex", "stat",
+    "test", "text", "time", "units", "const",
+]
+pin BUILTIN_MODS_SET = {
+    "math": true, "const": true, "stat": true, "units": true, "text": true,
+    "regex": true, "json": true, "csv": true, "time": true, "path": true,
+    "list": true, "map": true, "test": true,
+}
+
+pin TY_ANY = {tk: "any"}
+pin TY_TEXT = {tk: "kind", kind: "text"}
+pin TY_BOOL = {tk: "kind", kind: "bool"}
+pin TY_LIST = {tk: "kind", kind: "list"}
+pin TY_MAP = {tk: "kind", kind: "map"}
+pin TY_NIL = {tk: "kind", kind: "nil"}
+pin TY_DIMLESS = {tk: "num", dim: un.D0}
+pin TY_NUM_ANY = {tk: "num", dim: nil}
+
+fn ty_num(d):
+    return {tk: "num", dim: d}
+
+fn ty_kind(k):
+    return {tk: "kind", kind: k}
+
+fn ty_record(name, fields):
+    return {tk: "record", name: name, fields: fields}
+
+fn ty_fn(params, ret):
+    return {tk: "fn", params: params, ret: ret}
+
+fn ty_mod(name, exports):
+    return {tk: "module", name: name, exports: exports}
+
+fn ty_matches(actual, expected):
+    if actual.tk == "any" or expected.tk == "any":
+        return true
+    if expected.tk == "num":
+        if actual.tk != "num":
+            return false
+        if expected.dim != nil and actual.dim != nil:
+            return un.deq(expected.dim, actual.dim)
+        return true
+    if expected.tk == "record":
+        return actual.tk == "record" and actual.name == expected.name
+    if expected.tk == "kind":
+        if expected.kind == "fn":
+            return actual.tk == "fn" or (actual.tk == "kind" and actual.kind == "fn")
+        return actual.tk == "kind" and actual.kind == expected.kind
+    return true
+
+fn ty_label(ty):
+    if ty.tk == "num":
+        if ty.dim == nil:
+            return "num"
+        let ds = un.dimstr(ty.dim)
+        if ds == "":
+            return "dimensionless"
+        return ds
+    if ty.tk == "kind":
+        return ty.kind
+    if ty.tk == "record":
+        return ty.name
+    if ty.tk == "fn":
+        return "fn"
+    if ty.tk == "module":
+        return "module(" + ty.name + ")"
+    return "any"
+
+fn stdmod_exports(name):
+    if name == "math":
+        var ex = {
+            pi: TY_DIMLESS, tau: TY_DIMLESS, e: TY_DIMLESS, inf: TY_DIMLESS, nan: TY_DIMLESS, phi: TY_DIMLESS,
+            gcd: ty_fn([{name: "a", ty: TY_DIMLESS, hd: false}, {name: "b", ty: TY_DIMLESS, hd: false}], TY_DIMLESS),
+            lcm: ty_fn([{name: "a", ty: TY_DIMLESS, hd: false}, {name: "b", ty: TY_DIMLESS, hd: false}], TY_DIMLESS),
+            factorial: ty_fn([{name: "n", ty: TY_DIMLESS, hd: false}], TY_DIMLESS),
+            comb: ty_fn([{name: "n", ty: TY_DIMLESS, hd: false}, {name: "k", ty: TY_DIMLESS, hd: false}], TY_DIMLESS),
+            perm: ty_fn([{name: "n", ty: TY_DIMLESS, hd: false}, {name: "k", ty: TY_DIMLESS, hd: false}], TY_DIMLESS),
+            is_prime: ty_fn([{name: "n", ty: TY_DIMLESS, hd: false}], TY_BOOL),
+            isfinite: ty_fn([{name: "x", ty: TY_NUM_ANY, hd: false}], TY_BOOL),
+            isnan: ty_fn([{name: "x", ty: TY_NUM_ANY, hd: false}], TY_BOOL),
+            isinf: ty_fn([{name: "x", ty: TY_NUM_ANY, hd: false}], TY_BOOL),
+        }
+        let unary_math = ["sin", "cos", "tan", "asin", "acos", "atan", "exp", "expm1", "ln", "log1p", "log10", "log2", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh"]
+        for fnm in unary_math:
+            ex[fnm] = ty_fn([{name: "x", ty: TY_DIMLESS, hd: false}], TY_DIMLESS)
+        return ex
+    if name == "const":
+        return {
+            c: ty_num(un.mk_dim({m: 1, s: -1})),
+            h: ty_num(un.mk_dim({kg: 1, m: 2, s: -1})),
+            hbar: ty_num(un.mk_dim({kg: 1, m: 2, s: -1})),
+            kB: ty_num(un.mk_dim({kg: 1, m: 2, s: -2, k: -1})),
+            NA: ty_num(un.mk_dim({mol: -1})),
+            e: ty_num(un.mk_dim({a: 1, s: 1})),
+            G: ty_num(un.mk_dim({m: 3, kg: -1, s: -2})),
+            eps0: ty_num(un.mk_dim({kg: -1, m: -3, s: 4, a: 2})),
+            mu0: ty_num(un.mk_dim({kg: 1, m: 1, s: -2, a: -2})),
+            me: ty_num(un.mk_dim({kg: 1})),
+            mp: ty_num(un.mk_dim({kg: 1})),
+            mn: ty_num(un.mk_dim({kg: 1})),
+            u: ty_num(un.mk_dim({kg: 1})),
+            alpha: TY_DIMLESS,
+            Ry: ty_num(un.mk_dim({m: -1})),
+            F: ty_num(un.mk_dim({a: 1, s: 1, mol: -1})),
+            muB: ty_num(un.mk_dim({m: 2, a: 1})),
+            R: ty_num(un.mk_dim({kg: 1, m: 2, s: -2, k: -1, mol: -1})),
+            g0: ty_num(un.mk_dim({m: 1, s: -2})),
+            atm: ty_num(un.mk_dim({kg: 1, m: -1, s: -2})),
+            sigma: ty_num(un.mk_dim({kg: 1, s: -3, k: -4})),
+            au: ty_num(un.mk_dim({m: 1})),
+            ly: ty_num(un.mk_dim({m: 1})),
+            pc: ty_num(un.mk_dim({m: 1})),
+            M_sun: ty_num(un.mk_dim({kg: 1})),
+            M_earth: ty_num(un.mk_dim({kg: 1})),
+            R_earth: ty_num(un.mk_dim({m: 1})),
+            L_sun: ty_num(un.mk_dim({kg: 1, m: 2, s: -3})),
+            T_cmb: ty_num(un.mk_dim({k: 1})),
+        }
+    return {}
+
+fn resolve_file_path(n, base_file_path, stdlib_dir):
+    if n.modpath != nil:
+        if len(n.modpath) == 2 and n.modpath[0] == "std":
+            return path.normalize(path.join(stdlib_dir, n.modpath[1] + ".thrum"))
+        return {err: "unknown module path '" + join(".", n.modpath) + "'"}
+    if n.path != nil:
+        if starts(n.path, "std/"):
+            var relp = slice(n.path, 4)
+            if not ends(relp, ".thrum"):
+                relp = relp + ".thrum"
+            return path.normalize(path.join(stdlib_dir, relp))
+        var base = "."
+        if base_file_path != nil and base_file_path != "":
+            let d = path.dirname(base_file_path)
+            if d != "":
+                base = d
+        return path.normalize(path.join(base, n.path))
+    return nil
+
+fn check_program(entry_src, entry_path, stdlib_dir, fs_cap, disp_path = nil, load_only = false):
+    # Global module table collected across all transitive imports
+    var mod_records = []
+    var seen_exports = {}
+    var seen_keys = {}
+    var next_mod_id = 1
+
+    fn _load_unit(src, file_path, key, show_path = nil):
+        let parsed = p.parse(src, show_path ?? file_path)
+        let info = parsed.info
+        fn scan_stmts(stmts, in_settle = false):
+            for st in stmts:
+                let k = st.kind
+                if in_settle and k != "decl":
+                    u.diag_err(info, st.site, "only declarations allowed inside settle")
+                if k == "decl" and st.init != nil and not in_settle:
+                    u.diag_err(info, st.site, "'init' is only allowed inside 'settle'")
+                if k == "use":
+                    if st.path == nil and st.modpath == nil:
+                        continue
+                    let rp = resolve_file_path(st, file_path, stdlib_dir)
+                    if type(rp) == "map" and "err" in rp:
+                        u.diag_err(info, st.site, rp.err)
+                    if not fs_cap.is_file(rp):
+                        var disp = st.path
+                        if st.modpath != nil:
+                            disp = join(".", st.modpath)
+                        u.diag_err(info, st.site, "cannot find module '" + str(disp) + "'")
+                    if not (rp in seen_keys):
+                        let msrc = fs_cap.read(rp)
+                        let mod_key = "file:" + rp
+                        seen_keys[rp] = mod_key
+                        _load_unit(msrc, rp, mod_key)
+                elif k == "settle":
+                    scan_stmts(st.body, true)
+                elif k == "if":
+                    for arm in st.arms:
+                        scan_stmts(arm.body)
+                    if st.els != nil:
+                        scan_stmts(st.els)
+                elif k == "match":
+                    for cs in st.cases:
+                        scan_stmts(cs.body)
+                elif k == "try":
+                    scan_stmts(st.body)
+                    scan_stmts(st.handler)
+                elif k == "for" or k == "while" or k == "repeat" or k == "fndecl" or k == "with" or k == "on" or k == "live" or k == "whatif":
+                    scan_stmts(st.body)
+        scan_stmts(parsed.body)
+        if key != nil:
+            let mid = next_mod_id
+            next_mod_id += 1
+            mod_records = push(mod_records, {id: mid, key: key, file_path: file_path, parsed: parsed})
+        return parsed
+
+    if load_only:
+        let main_parsed = _load_unit(entry_src, entry_path, nil, disp_path)
+        return {entry: main_parsed, modules: mod_records, file_keys: seen_keys}
+
+    fn _check_unit(src, file_path, key, show_path = nil):
+        let parsed = p.parse(src, show_path ?? file_path)
+        let info = parsed.info
+        let prog = parsed.body
+
+        # Bucketed mutable scopes map: buckets[sid / 32][sid % 32]
+        var sc_buckets = []
+        var n_scopes = 0
+
+        fn sc_new(parent_id, is_rel):
+            let sid = n_scopes
+            n_scopes += 1
+            let sc = {names: {}, types: {}, parent: parent_id, "rel": is_rel}
+            let bi = floor(sid / 32)
+            while len(sc_buckets) <= bi:
+                sc_buckets = push(sc_buckets, [])
+            sc_buckets[bi] = push(sc_buckets[bi], sc)
+            return sid
+
+        fn sc_get(sid):
+            let bi = floor(sid / 32)
+            let oi = sid % 32
+            return sc_buckets[bi][oi]
+
+        fn sc_set_sym(sid, nm, kind_str, ty):
+            let bi = floor(sid / 32)
+            let oi = sid % 32
+            var sc = sc_buckets[bi][oi]
+            var nms = sc.names
+            var tys = sc.types
+            nms[nm] = kind_str
+            tys[nm] = ty
+            sc["names"] = nms
+            sc["types"] = tys
+            sc_buckets[bi][oi] = sc
+
+        fn sc_set_ty(sid, nm, ty):
+            let bi = floor(sid / 32)
+            let oi = sid % 32
+            var sc = sc_buckets[bi][oi]
+            var tys = sc.types
+            tys[nm] = ty
+            sc["types"] = tys
+            sc_buckets[bi][oi] = sc
+
+        fn sc_lookup(sid, nm):
+            var cur = sid
+            while cur >= 0:
+                let sc = sc_get(cur)
+                if nm in sc.names:
+                    return {kind: sc.names[nm], ty: sc.types[nm], sid: cur}
+                cur = sc.parent
+            return nil
+
+        let root_sid = sc_new(-1, true)
+        for bn in keys(BUILTIN_SET):
+            sc_set_sym(root_sid, bn, "builtin", TY_ANY)
+
+        fn ty_from_ann(ann, sid, site):
+            if ann == nil:
+                return TY_ANY
+            if ann.kind == "kind":
+                if ann.name == "any":
+                    return TY_ANY
+                if ann.name == "num":
+                    return TY_NUM_ANY
+                return ty_kind(ann.name)
+            if ann.kind == "dim":
+                return ty_num(ann.dim)
+            if ann.kind == "record":
+                if contains_dot(ann.full):
+                    let pts = split(ann.full, ".")
+                    let r0 = sc_lookup(sid, pts[0])
+                    var cty = TY_ANY
+                    if r0 != nil:
+                        cty = r0.ty
+                    var pi = 1
+                    while pi < len(pts):
+                        let pn = pts[pi]
+                        if cty.tk == "module" and pn in cty.exports:
+                            cty = cty.exports[pn]
+                        else:
+                            cty = TY_ANY
+                        pi += 1
+                    if cty.tk == "record":
+                        return cty
+                    return ty_record(ann.short, [])
+                let r1 = sc_lookup(sid, ann.short)
+                if r1 != nil and r1.ty.tk == "record":
+                    return r1.ty
+                u.diag_err(info, site, "unknown type or unit '" + ann.full + "'")
+            return TY_ANY
+
+        fn contains_dot(s):
+            return len(split(s, ".")) > 1
+
+        fn check_block(body, sid, expected_ret, fn_name):
+            var def_items = []
+            for st in body:
+                def_items = check_stmt(st, sid, def_items, false, expected_ret, fn_name)
+            run_deferred(def_items)
+
+        fn pat_bind(pat, sid):
+            if pat.kind == "bind":
+                sc_set_sym(sid, pat.name, "local", TY_ANY)
+            elif pat.kind == "map":
+                for it in pat.items:
+                    pat_bind(it.p, sid)
+            elif pat.kind == "record":
+                for it in pat.items:
+                    pat_bind(it.p, sid)
+            elif pat.kind == "list":
+                for sub in pat.items:
+                    pat_bind(sub, sid)
+                if pat.rest != nil:
+                    sc_set_sym(sid, pat.rest, "local", TY_LIST)
+
+        fn run_deferred(items):
+            for it in items:
+                if it.kind == "expr":
+                    var d2 = []
+                    let res = check_expr(it.ex, it.sid, d2)
+                    run_deferred(res.def_items)
+                elif it.kind == "block":
+                    check_block(it.body, it.sid, nil, nil)
+                elif it.kind == "fn":
+                    let f = it.fn_node
+                    var d2 = []
+                    for c in f.requires:
+                        let r1 = check_expr(c.cond, it.sid, d2)
+                        d2 = r1.def_items
+                        if c.msg != nil:
+                            let r2 = check_expr(c.msg, it.sid, d2)
+                            d2 = r2.def_items
+                    run_deferred(d2)
+                    var nm = f.name
+                    if nm == nil:
+                        nm = "fn"
+                    check_block(f.body, it.sid, it.expected_ret, nm)
+                    let ens_sid = sc_new(it.sid, false)
+                    sc_set_sym(ens_sid, "result", "local", it.expected_ret)
+                    var d3 = []
+                    for c in f.ensures:
+                        let r1 = check_expr(c.cond, ens_sid, d3)
+                        d3 = r1.def_items
+                        if c.msg != nil:
+                            let r2 = check_expr(c.msg, ens_sid, d3)
+                            d3 = r2.def_items
+                    run_deferred(d3)
+
+        fn check_bin(n, sid, def_items):
+            let op = n.op
+            var di = def_items
+            if op == "and" or op == "or":
+                let r1 = check_expr(n.left, sid, di)
+                di = r1.def_items
+                let r2 = check_expr(n.right, sid, di)
+                return {ty: TY_BOOL, def_items: r2.def_items}
+            let r1 = check_expr(n.left, sid, di)
+            let lt = r1.ty
+            let r2 = check_expr(n.right, sid, r1.def_items)
+            let rt = r2.ty
+            di = r2.def_items
+            if op == "??":
+                if lt.tk == "kind" and lt.kind == "nil":
+                    return {ty: rt, def_items: di}
+                return {ty: TY_ANY, def_items: di}
+            if op == "==" or op == "!=" or op == "~" or op == "in" or op == "notin":
+                return {ty: TY_BOOL, def_items: di}
+            if op == ".." or op == "..<":
+                return {ty: TY_LIST, def_items: di}
+            if op == "<" or op == ">" or op == "<=" or op == ">=":
+                if lt.tk == "num" and rt.tk == "num" and lt.dim != nil and rt.dim != nil and not un.deq(lt.dim, rt.dim):
+                    u.diag_err(info, n.site, "cannot compare " + ty_label(lt) + " with " + ty_label(rt))
+                return {ty: TY_BOOL, def_items: di}
+            if op == "+" or op == "-":
+                if lt.tk == "num" and rt.tk == "num":
+                    if lt.dim != nil and rt.dim != nil:
+                        if not un.deq(lt.dim, rt.dim):
+                            u.diag_err(info, n.site, "dimension mismatch: " + ty_label(lt) + " " + op + " " + ty_label(rt), "convert with 'as', or check your units — Thrum never guesses")
+                        return {ty: ty_num(lt.dim), def_items: di}
+                    if lt.dim != nil:
+                        return {ty: ty_num(lt.dim), def_items: di}
+                    return {ty: ty_num(rt.dim), def_items: di}
+                if op == "+" and lt.tk == "kind" and rt.tk == "kind" and lt.kind == rt.kind and (lt.kind == "text" or lt.kind == "list" or lt.kind == "map"):
+                    return {ty: lt, def_items: di}
+                if lt.tk != "any" and rt.tk != "any" and lt.tk != rt.tk:
+                    var act = "subtract"
+                    if op == "+":
+                        act = "add"
+                    u.diag_err(info, n.site, "cannot " + act + " " + ty_label(lt) + " and " + ty_label(rt))
+                return {ty: TY_ANY, def_items: di}
+            if op == "*":
+                if lt.tk == "num" and rt.tk == "num":
+                    if lt.dim != nil and rt.dim != nil:
+                        return {ty: ty_num(un.dadd(lt.dim, rt.dim)), def_items: di}
+                    return {ty: TY_NUM_ANY, def_items: di}
+                return {ty: TY_ANY, def_items: di}
+            if op == "/":
+                if lt.tk == "num" and rt.tk == "num":
+                    if lt.dim != nil and rt.dim != nil:
+                        return {ty: ty_num(un.dsub(lt.dim, rt.dim)), def_items: di}
+                    return {ty: TY_NUM_ANY, def_items: di}
+                return {ty: TY_ANY, def_items: di}
+            if op == "%":
+                if lt.tk == "num" and rt.tk == "num" and lt.dim != nil and rt.dim != nil and not un.deq(lt.dim, rt.dim):
+                    u.diag_err(info, n.site, "dimension mismatch in '%'")
+                if lt.tk == "num":
+                    return {ty: lt, def_items: di}
+                return {ty: TY_NUM_ANY, def_items: di}
+            if op == "^":
+                if rt.tk == "num" and rt.dim != nil and not un.dimless(rt.dim):
+                    u.diag_err(info, n.site, "exponent must be dimensionless")
+                if lt.tk == "num" and lt.dim != nil and n.right.kind == "q" and n.right.lkind == "num":
+                    let ev = n.right.val.v
+                    if ev == floor(ev):
+                        return {ty: ty_num(un.dscale(lt.dim, un.frac(ev, 1))), def_items: di}
+                    if ev * 2 == floor(ev * 2):
+                        return {ty: ty_num(un.dscale(lt.dim, un.frac(ev * 2, 2))), def_items: di}
+                    return {ty: TY_NUM_ANY, def_items: di}
+                if lt.tk == "num" and lt.dim != nil and un.dimless(lt.dim):
+                    return {ty: TY_DIMLESS, def_items: di}
+                return {ty: TY_NUM_ANY, def_items: di}
+            return {ty: TY_ANY, def_items: di}
+
+        fn check_expr(n, sid, def_items):
+            let k = n.kind
+            var di = def_items
+            if k == "q":
+                if n.lkind == "nil":
+                    return {ty: TY_NIL, def_items: di}
+                if n.lkind == "bool":
+                    return {ty: TY_BOOL, def_items: di}
+                if n.lkind == "str":
+                    return {ty: TY_TEXT, def_items: di}
+                return {ty: ty_num(n.val.dim), def_items: di}
+            if k == "name":
+                let lk = sc_lookup(sid, n.name)
+                if lk == nil:
+                    u.diag_err(info, n.site, "undefined name '" + n.name + "'")
+                return {ty: lk.ty, def_items: di}
+            if k == "text":
+                for prt in n.parts:
+                    if prt.t == "expr":
+                        let r = check_expr(prt.v, sid, di)
+                        di = r.def_items
+                return {ty: TY_TEXT, def_items: di}
+            if k == "list":
+                for x in n.items:
+                    let r = check_expr(x, sid, di)
+                    di = r.def_items
+                return {ty: TY_LIST, def_items: di}
+            if k == "map":
+                for en in n.entries:
+                    let r1 = check_expr(en.k, sid, di)
+                    di = r1.def_items
+                    let r2 = check_expr(en.v, sid, di)
+                    di = r2.def_items
+                return {ty: TY_MAP, def_items: di}
+            if k == "bin":
+                return check_bin(n, sid, di)
+            if k == "un":
+                let r = check_expr(n.operand, sid, di)
+                di = r.def_items
+                if n.op == "not":
+                    return {ty: TY_BOOL, def_items: di}
+                if r.ty.tk != "any" and r.ty.tk != "num":
+                    u.diag_err(info, n.site, "cannot negate " + ty_label(r.ty))
+                return {ty: r.ty, def_items: di}
+            if k == "convert":
+                let r = check_expr(n.obj, sid, di)
+                di = r.def_items
+                let ot = r.ty
+                let td = n.dim
+                if ot.tk == "num" and ot.dim != nil and not un.deq(ot.dim, td):
+                    u.diag_err(info, n.site, "cannot convert " + ty_label(ot) + " to " + n.unit)
+                return {ty: ty_num(td), def_items: di}
+            if k == "call":
+                let rf = check_expr(n.fn_expr, sid, di)
+                let ft = rf.ty
+                di = rf.def_items
+                var arg_tys = []
+                for a in n.args:
+                    let ra = check_expr(a, sid, di)
+                    arg_tys = push(arg_tys, ra.ty)
+                    di = ra.def_items
+                if n.fn_expr.kind == "name":
+                    let fnm = n.fn_expr.name
+                    if fnm == "sqrt" and len(arg_tys) == 1:
+                        let at = arg_tys[0]
+                        if at.tk == "num" and at.dim != nil:
+                            return {ty: ty_num(un.dscale(at.dim, un.frac(1, 2))), def_items: di}
+                        return {ty: TY_NUM_ANY, def_items: di}
+                    if (fnm == "abs" or fnm == "floor" or fnm == "ceil" or fnm == "round" or fnm == "unc" or fnm == "si" or fnm == "exact") and len(arg_tys) > 0:
+                        if arg_tys[0].tk == "num":
+                            return {ty: arg_tys[0], def_items: di}
+                        return {ty: TY_NUM_ANY, def_items: di}
+                    if fnm == "bare" or fnm == "len" or fnm == "sign" or fnm == "count":
+                        return {ty: TY_DIMLESS, def_items: di}
+                    if fnm == "str" or fnm == "repr" or fnm == "type" or fnm == "unit" or fnm == "dim" or fnm == "upper" or fnm == "lower" or fnm == "trim" or fnm == "replace" or fnm == "join" or fnm == "fix" or fnm == "fmt":
+                        return {ty: TY_TEXT, def_items: di}
+                    if fnm == "bool" or fnm == "isnil" or fnm == "approx" or fnm == "starts" or fnm == "ends" or fnm == "any" or fnm == "all":
+                        return {ty: TY_BOOL, def_items: di}
+                    if fnm == "c2k" or fnm == "k2c":
+                        return {ty: ty_num(un.mk_dim({k: 1})), def_items: di}
+                    if fnm == "qty" and len(n.args) >= 2 and n.args[1].kind == "q" and n.args[1].lkind == "str":
+                        let pu = un.parse_unit(n.args[1].val, info, n.site)
+                        return {ty: ty_num(pu.dim), def_items: di}
+                    if fnm == "convert" and len(n.args) == 2 and n.args[1].kind == "q" and n.args[1].lkind == "str":
+                        let pu = un.parse_unit(n.args[1].val, info, n.site)
+                        if arg_tys[0].tk == "num" and arg_tys[0].dim != nil and not un.deq(arg_tys[0].dim, pu.dim):
+                            u.diag_err(info, n.site, "cannot convert " + ty_label(arg_tys[0]) + " to " + n.args[1].val)
+                        return {ty: ty_num(pu.dim), def_items: di}
+                if ft.tk == "record":
+                    var nreq = 0
+                    for f in ft.fields:
+                        if not f.hd:
+                            nreq += 1
+                    if len(arg_tys) < nreq or len(arg_tys) > len(ft.fields):
+                        u.diag_err(info, n.site, "record " + ft.name + " expects " + str(nreq) + ".." + str(len(ft.fields)) + " arguments, got " + str(len(arg_tys)))
+                    var ai = 0
+                    while ai < len(arg_tys):
+                        let fd = ft.fields[ai]
+                        let at = arg_tys[ai]
+                        if not ty_matches(at, fd.ty):
+                            if fd.ty.tk == "num" and at.tk == "num":
+                                u.diag_err(info, n.site, "field '" + fd.name + "' of " + ft.name + " should have dimension " + ty_label(fd.ty) + ", got " + ty_label(at))
+                            u.diag_err(info, n.site, "field '" + fd.name + "' of " + ft.name + " should be " + ty_label(fd.ty) + ", got " + ty_label(at))
+                        ai += 1
+                    return {ty: ft, def_items: di}
+                if ft.tk == "fn":
+                    var nreq = 0
+                    for prm in ft.params:
+                        if not prm.hd:
+                            nreq += 1
+                    if len(arg_tys) < nreq or len(arg_tys) > len(ft.params):
+                        u.diag_err(info, n.site, "function expects " + str(nreq) + ".." + str(len(ft.params)) + " arguments, got " + str(len(arg_tys)))
+                    var ai = 0
+                    while ai < len(arg_tys):
+                        let prm = ft.params[ai]
+                        let at = arg_tys[ai]
+                        if not ty_matches(at, prm.ty):
+                            if prm.ty.tk == "num" and at.tk == "num":
+                                u.diag_err(info, n.site, "parameter '" + prm.name + "' should have dimension " + ty_label(prm.ty) + ", got " + ty_label(at))
+                            u.diag_err(info, n.site, "parameter '" + prm.name + "' should be " + ty_label(prm.ty) + ", got " + ty_label(at))
+                        ai += 1
+                    return {ty: ft.ret, def_items: di}
+                return {ty: TY_ANY, def_items: di}
+            if k == "rec_lit":
+                let rt_r = check_expr(n.target, sid, di)
+                let rt = rt_r.ty
+                di = rt_r.def_items
+                var fmap = {}
+                if rt.tk == "record":
+                    for fd in rt.fields:
+                        fmap[fd.name] = fd
+                var seen_keys = {}
+                for en in n.entries:
+                    let rk = check_expr(en.k, sid, di)
+                    di = rk.def_items
+                    let rv = check_expr(en.v, sid, di)
+                    di = rv.def_items
+                    if rt.tk == "record" and en.k.kind == "q" and en.k.lkind == "str":
+                        let fnm = en.k.val
+                        if not (fnm in fmap):
+                            u.diag_err(info, n.site, "record '" + rt.name + "' has no field '" + fnm + "'")
+                        seen_keys[fnm] = true
+                        let fty = fmap[fnm].ty
+                        if not ty_matches(rv.ty, fty):
+                            if fty.tk == "num" and rv.ty.tk == "num":
+                                u.diag_err(info, n.site, "field '" + fnm + "' of " + rt.name + " should have dimension " + ty_label(fty) + ", got " + ty_label(rv.ty))
+                            u.diag_err(info, n.site, "field '" + fnm + "' of " + rt.name + " should be " + ty_label(fty) + ", got " + ty_label(rv.ty))
+                if rt.tk == "record":
+                    for fd in rt.fields:
+                        if not fd.hd and not (fd.name in seen_keys):
+                            u.diag_err(info, n.site, "missing required field '" + fd.name + "' for record '" + rt.name + "'")
+                    return {ty: rt, def_items: di}
+                return {ty: TY_ANY, def_items: di}
+            if k == "index":
+                let r1 = check_expr(n.obj, sid, di)
+                let r2 = check_expr(n.idx, sid, r1.def_items)
+                return {ty: TY_ANY, def_items: r2.def_items}
+            if k == "slice":
+                let ro = check_expr(n.obj, sid, di)
+                di = ro.def_items
+                if n.start != nil:
+                    let rs = check_expr(n.start, sid, di)
+                    di = rs.def_items
+                if n.stop != nil:
+                    let rp = check_expr(n.stop, sid, di)
+                    di = rp.def_items
+                if n.step != nil:
+                    let rt = check_expr(n.step, sid, di)
+                    di = rt.def_items
+                if ro.ty.tk == "kind" and (ro.ty.kind == "list" or ro.ty.kind == "text"):
+                    return {ty: ro.ty, def_items: di}
+                return {ty: TY_ANY, def_items: di}
+            if k == "dot":
+                let ro = check_expr(n.obj, sid, di)
+                di = ro.def_items
+                let ot = ro.ty
+                if ot.tk == "module":
+                    if n.name in ot.exports:
+                        return {ty: ot.exports[n.name], def_items: di}
+                    return {ty: TY_ANY, def_items: di}
+                if ot.tk == "record":
+                    for fd in ot.fields:
+                        if fd.name == n.name:
+                            return {ty: fd.ty, def_items: di}
+                    u.diag_err(info, n.site, "record '" + ot.name + "' has no field '" + n.name + "'")
+                return {ty: TY_ANY, def_items: di}
+            if k == "lambda":
+                let sub = sc_new(sid, false)
+                sc_set_sym(sub, "it", "param", TY_ANY)
+                di = push(di, {kind: "expr", ex: n.body, sid: sub})
+                return {ty: ty_fn([{name: "it", ty: TY_ANY, hd: false}], TY_ANY), def_items: di}
+            if k == "fnexpr":
+                let sub = sc_new(sid, false)
+                var ptys = []
+                for prm in n.params:
+                    if prm.default != nil:
+                        let rd = check_expr(prm.default, sub, di)
+                        di = rd.def_items
+                    let pty = ty_from_ann(prm.type, sid, prm.site)
+                    sc_set_sym(sub, prm.name, "param", pty)
+                    ptys = push(ptys, {name: prm.name, ty: pty, hd: prm.default != nil})
+                let rty = ty_from_ann(n.ret, sid, n.site)
+                di = push(di, {kind: "fn", fn_node: n, sid: sub, expected_ret: rty})
+                return {ty: ty_fn(ptys, rty), def_items: di}
+            if k == "comp":
+                let ri = check_expr(n.iter, sid, di)
+                di = ri.def_items
+                let sub = sc_new(sid, false)
+                sc_set_sym(sub, n.var_name, "local", TY_ANY)
+                if n.cond != nil:
+                    let rc = check_expr(n.cond, sub, di)
+                    di = rc.def_items
+                let re = check_expr(n.elem, sub, di)
+                return {ty: TY_LIST, def_items: re.def_items}
+            u.diag_err(info, n.site, "cannot check " + k)
+
+        fn check_stmt(n, sid, def_items, in_settle, expected_ret, fn_name):
+            let k = n.kind
+            var di = def_items
+            if k == "exprstmt":
+                return check_expr(n.value, sid, di).def_items
+            if k == "decl":
+                if n.init != nil and not in_settle:
+                    u.diag_err(info, n.site, "'init' is only allowed inside 'settle'")
+                if n.init != nil:
+                    di = check_expr(n.init, sid, di).def_items
+                let rv = check_expr(n.value, sid, di)
+                di = rv.def_items
+                if not in_settle:
+                    sc_set_sym(sid, n.name, n.kw, rv.ty)
+                return di
+            if k == "record":
+                var fields = []
+                for fd in n.fields:
+                    if fd.default != nil:
+                        di = check_expr(fd.default, sid, di).def_items
+                    let fty = ty_from_ann(fd.type, sid, fd.site)
+                    fields = push(fields, {name: fd.name, ty: fty, hd: fd.default != nil})
+                sc_set_sym(sid, n.name, "record", ty_record(n.name, fields))
+                return di
+            if k == "assign":
+                let rv = check_expr(n.value, sid, di)
+                di = rv.def_items
+                var cur = n.target
+                while cur.kind == "index" or cur.kind == "dot":
+                    if cur.kind == "index":
+                        di = check_expr(cur.idx, sid, di).def_items
+                    cur = cur.obj
+                if cur.kind != "name":
+                    u.diag_err(info, n.site, "invalid assignment target")
+                let lk = sc_lookup(sid, cur.name)
+                if lk == nil:
+                    u.diag_err(info, cur.site, "undefined name '" + cur.name + "'", "declare inputs with 'var'")
+                if lk.kind == "let":
+                    let fsc = sc_get(lk.sid)
+                    if fsc.rel:
+                        u.diag_err(info, n.site, "'" + cur.name + "' is a derived relation, not an input", "assign to its inputs instead, or declare it with 'var'")
+                    u.diag_err(info, n.site, "cannot assign to immutable '" + cur.name + "'", "declare it with 'var' if it needs to change")
+                if lk.kind == "pin" or lk.kind == "fn" or lk.kind == "cap" or lk.kind == "builtin" or lk.kind == "record" or (lk.kind == "module" and n.target.kind == "name"):
+                    u.diag_err(info, n.site, "cannot assign to immutable '" + cur.name + "'", "declare it with 'var' if it needs to change")
+                if n.target.kind == "name" and n.op == "=":
+                    if lk.ty.tk != "any" and rv.ty.tk != "any" and not ty_matches(rv.ty, lk.ty):
+                        sc_set_ty(lk.sid, cur.name, TY_ANY)
+                return di
+            if k == "fndecl":
+                let sub = sc_new(sid, false)
+                var ptys = []
+                for prm in n.params:
+                    if prm.default != nil:
+                        di = check_expr(prm.default, sub, di).def_items
+                    let pty = ty_from_ann(prm.type, sid, prm.site)
+                    sc_set_sym(sub, prm.name, "param", pty)
+                    ptys = push(ptys, {name: prm.name, ty: pty, hd: prm.default != nil})
+                let rty = ty_from_ann(n.ret, sid, n.site)
+                sc_set_sym(sid, n.name, "fn", ty_fn(ptys, rty))
+                return push(di, {kind: "fn", fn_node: n, sid: sub, expected_ret: rty})
+            if k == "if":
+                for arm in n.arms:
+                    di = check_expr(arm.cond, sid, di).def_items
+                    check_block(arm.body, sid, expected_ret, fn_name)
+                if n.els != nil:
+                    check_block(n.els, sid, expected_ret, fn_name)
+                return di
+            if k == "for":
+                di = check_expr(n.iter, sid, di).def_items
+                let sub = sc_new(sid, false)
+                sc_set_sym(sub, n.a, "local", TY_ANY)
+                if n.b != nil:
+                    sc_set_sym(sub, n.b, "local", TY_ANY)
+                check_block(n.body, sub, expected_ret, fn_name)
+                return di
+            if k == "while":
+                di = check_expr(n.cond, sid, di).def_items
+                check_block(n.body, sid, expected_ret, fn_name)
+                return di
+            if k == "repeat":
+                di = check_expr(n.count, sid, di).def_items
+                check_block(n.body, sid, expected_ret, fn_name)
+                return di
+            if k == "match":
+                di = check_expr(n.subject, sid, di).def_items
+                for cs in n.cases:
+                    let sub = sc_new(sid, false)
+                    pat_bind(cs.pat, sub)
+                    if cs.guard != nil:
+                        let rg = check_expr(cs.guard, sub, [])
+                        run_deferred(rg.def_items)
+                    check_block(cs.body, sub, expected_ret, fn_name)
+                return di
+            if k == "try":
+                check_block(n.body, sid, expected_ret, fn_name)
+                let cur_rel = sc_get(sid).rel
+                let sub = sc_new(sid, cur_rel)
+                sc_set_sym(sub, n.name, "local", TY_MAP)
+                check_block(n.handler, sub, expected_ret, fn_name)
+                return di
+            if k == "return":
+                var rty = TY_NIL
+                if n.value != nil:
+                    let rr = check_expr(n.value, sid, di)
+                    rty = rr.ty
+                    di = rr.def_items
+                if expected_ret != nil and expected_ret.tk != "any" and not ty_matches(rty, expected_ret):
+                    var fnm = fn_name
+                    if fnm == nil:
+                        fnm = "fn"
+                    if expected_ret.tk == "num" and rty.tk == "num":
+                        u.diag_err(info, n.site, "return of " + fnm + " should have dimension " + ty_label(expected_ret) + ", got " + ty_label(rty))
+                    u.diag_err(info, n.site, "return of " + fnm + " should be " + ty_label(expected_ret) + ", got " + ty_label(rty))
+                return di
+            if k == "break" or k == "continue" or k == "contract":
+                return di
+            if k == "fail":
+                return check_expr(n.value, sid, di).def_items
+            if k == "assert":
+                di = check_expr(n.cond, sid, di).def_items
+                if n.msg != nil:
+                    di = check_expr(n.msg, sid, di).def_items
+                return di
+            if k == "with":
+                let cur_rel = sc_get(sid).rel
+                let sub = sc_new(sid, cur_rel)
+                for cp in n.caps:
+                    if not (cp.name in CAPS_SET):
+                        u.diag_err(info, n.site, "unknown capability '" + cp.name + "'", "available: " + join(", ", CAPS_LIST))
+                    for a in cp.args:
+                        di = check_expr(a, sid, di).def_items
+                    sc_set_sym(sub, cp.name, "cap", ty_kind("cap"))
+                check_block(n.body, sub, expected_ret, fn_name)
+                return di
+            if k == "on":
+                di = check_expr(n.cond, sid, di).def_items
+                let sub = sc_new(sid, false)
+                return push(di, {kind: "block", body: n.body, sid: sub})
+            if k == "settle":
+                if not sc_get(sid).rel:
+                    u.diag_err(info, n.site, "settle needs a relation scope")
+                if n.tol != nil:
+                    di = check_expr(n.tol, sid, di).def_items
+                for st in n.body:
+                    if st.kind != "decl":
+                        u.diag_err(info, st.site, "only declarations allowed inside settle")
+                    sc_set_sym(sid, st.name, st.kw, TY_ANY)
+                for st in n.body:
+                    di = check_stmt(st, sid, di, true, expected_ret, fn_name)
+                return di
+            if k == "live":
+                if sc_get(sid).rel:
+                    check_block(n.body, sid, nil, nil)
+                else:
+                    let sub = sc_new(sid, true)
+                    check_block(n.body, sub, nil, nil)
+                return di
+            if k == "whatif":
+                for pr in n.pairs:
+                    let lk = sc_lookup(sid, pr.name)
+                    if lk == nil or (lk.kind != "var" and lk.kind != "let"):
+                        u.diag_err(info, n.site, "whatif needs a live binding, '" + pr.name + "' isn't one")
+                    di = check_expr(pr.expr, sid, di).def_items
+                let sub = sc_new(sid, false)
+                check_block(n.body, sub, nil, nil)
+                return di
+            if k == "why" or k == "budget":
+                let lk = sc_lookup(sid, n.name)
+                if lk == nil:
+                    u.diag_err(info, n.site, "undefined name '" + n.name + "'")
+                if k == "budget" and lk.kind != "var" and lk.kind != "let":
+                    u.diag_err(info, n.site, "budget needs a live binding")
+                return di
+            if k == "use":
+                if n.path == nil and n.modpath == nil:
+                    if not (n.name in BUILTIN_MODS_SET):
+                        u.diag_err(info, n.site, "unknown module '" + n.name + "'", "available: " + join(", ", sort(BUILTIN_MODS_LIST)))
+                    let nm = n.alias ?? n.name
+                    sc_set_sym(sid, nm, "module", ty_mod(n.name, stdmod_exports(n.name)))
+                    return di
+                let rp = resolve_file_path(n, file_path, stdlib_dir)
+                if type(rp) == "map" and "err" in rp:
+                    u.diag_err(info, n.site, rp.err)
+                if not fs_cap.is_file(rp):
+                    var disp = n.path
+                    if n.modpath != nil:
+                        disp = join(".", n.modpath)
+                    u.diag_err(info, n.site, "cannot find module '" + str(disp) + "'")
+                if not (rp in seen_exports):
+                    seen_exports[rp] = {}
+                    let msrc = fs_cap.read(rp)
+                    let mod_key = "file:" + rp
+                    seen_keys[rp] = mod_key
+                    let res = _check_unit(msrc, rp, mod_key)
+                    seen_exports[rp] = res.exports
+                var alias = n.alias
+                if alias == nil:
+                    if n.modpath != nil:
+                        alias = n.modpath[len(n.modpath) - 1]
+                    else:
+                        alias = path.stem(rp)
+                sc_set_sym(sid, alias, "module", ty_mod(alias, seen_exports[rp]))
+                return di
+            return di
+
+        check_block(prog, root_sid, nil, nil)
+        let exps = sc_get(root_sid).types
+        var mid = 0
+        if key != nil:
+            mid = next_mod_id
+            next_mod_id += 1
+            mod_records = push(mod_records, {id: mid, key: key, file_path: file_path, parsed: parsed})
+        return {exports: exps, parsed: parsed}
+
+    # Resolve AST 'use' nodes cleanly: notice maps in Thrum AST are CoW, so we store resolved mod_key map rp -> key alongside parsed!
+    let main_res = _check_unit(entry_src, entry_path, nil, disp_path)
+    return {entry: main_res.parsed, modules: mod_records, file_keys: seen_keys}

@@ -1,0 +1,7 @@
+use std.finance
+with io:
+    io.say(round(finance.compound(1000, 0.05, 2), 2))
+    io.say(round(finance.npv(0.1, [-100, 110]), 2))
+    io.say(round(finance.pmt(1000, 0.1, 2), 2))
+    io.say(round(finance.cagr(100, 121, 2), 4))
+    io.say(round(finance.sharpe([0.1, 0.2, 0.3], 0.1), 4))

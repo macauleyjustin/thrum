@@ -1,0 +1,9 @@
+use math
+with io:
+    io.say(round(math.sin(math.pi / 6), 6))
+    io.say(round(math.cos(0), 6))
+    io.say(round(math.atan2(1 m, 1 m), 6))
+    io.say(math.log(8, 2))
+    io.say(math.hypot(3 m, 4 m))
+    io.say(math.gcd(18, 24))
+    io.say(math.sin(0.5 ± 0.01))

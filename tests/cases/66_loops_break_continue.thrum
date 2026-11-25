@@ -1,0 +1,13 @@
+var total = 0
+for i in 1..6:
+    if i == 2: continue
+    if i == 5: break
+    total += i
+var pairs = []
+for k, v in [["a", 1], ["b", 2]]:
+    pairs = push(pairs, "{k}={v}")
+var w = 3
+while w > 0:
+    w -= 1
+with io:
+    io.say("{total} {pairs} {w}")

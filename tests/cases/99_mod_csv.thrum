@@ -1,0 +1,7 @@
+use csv
+let raw = "name,dist,time\nA,100 m,10 s\nB,250 m,25 s"
+let rows = csv.parse_nums(raw)
+with io:
+    io.say(rows[0].dist / rows[0].time)
+    io.say(rows[1].name)
+    io.print(csv.stringify(rows, ["name", "dist"]))

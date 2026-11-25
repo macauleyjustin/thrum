@@ -1,0 +1,21 @@
+# Compiled binaries & build intermediates
+runtime/build/
+runtime/libthrumrt.a
+thrumc
+tetris
+solitaire
+ThrumSolitaire.app/
+*.thrumc.c
+.thrumc_run_*
+
+# Python caches & packaging
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# OS & editor junk
+.DS_Store
+*.swp
+*~

@@ -1,0 +1,8 @@
+fn work(f: N, d: m = 2 m) -> J:
+    return f * d
+fn tag(x: any) -> text:
+    return type(x)
+with io:
+    io.say(work(5 N))
+    io.say(work(5 N, 3 m))
+    io.say(tag([1, 2]))

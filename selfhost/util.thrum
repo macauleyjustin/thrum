@@ -1,0 +1,132 @@
+use text
+
+pin DIGIT_SET = {
+    "0": true, "1": true, "2": true, "3": true, "4": true,
+    "5": true, "6": true, "7": true, "8": true, "9": true,
+}
+
+pin HEX_SET = {
+    "0": true, "1": true, "2": true, "3": true, "4": true,
+    "5": true, "6": true, "7": true, "8": true, "9": true,
+    "a": true, "b": true, "c": true, "d": true, "e": true, "f": true,
+    "A": true, "B": true, "C": true, "D": true, "E": true, "F": true,
+}
+
+pin BIN_SET = {"0": true, "1": true}
+
+pin ALPHA_SET = {
+    "a": true, "b": true, "c": true, "d": true, "e": true, "f": true, "g": true,
+    "h": true, "i": true, "j": true, "k": true, "l": true, "m": true, "n": true,
+    "o": true, "p": true, "q": true, "r": true, "s": true, "t": true, "u": true,
+    "v": true, "w": true, "x": true, "y": true, "z": true,
+    "A": true, "B": true, "C": true, "D": true, "E": true, "F": true, "G": true,
+    "H": true, "I": true, "J": true, "K": true, "L": true, "M": true, "N": true,
+    "O": true, "P": true, "Q": true, "R": true, "S": true, "T": true, "U": true,
+    "V": true, "W": true, "X": true, "Y": true, "Z": true, "_": true,
+}
+
+pin IDENT_SET = ALPHA_SET + DIGIT_SET
+pin UNIT_START_SET = ALPHA_SET + {"µ": true, "°": true, "Ω": true}
+pin UNIT_CONT_SET = IDENT_SET + {"µ": true, "°": true, "Ω": true}
+pin EXP_SIGN_SET = {"+": true, "-": true}
+
+pin ESC_MAP = {
+    "n": "\n",
+    "t": "\t",
+    "r": "\r",
+    "\\": "\\",
+    "\"": "\"",
+    "'": "'",
+    r"{": r"{",
+    "}": "}",
+    "0": "\0",
+}
+
+# 3-tier chunked append buffer for O(n) amortized collection in pure immutable lists
+fn buf_new():
+    return {t0: [], t1: [], t2: []}
+
+fn buf_push(b, x):
+    let c0 = push(b.t0, x)
+    if len(c0) < 32:
+        return {t0: c0, t1: b.t1, t2: b.t2}
+    let c1 = push(b.t1, c0)
+    if len(c1) < 32:
+        return {t0: [], t1: c1, t2: b.t2}
+    return {t0: [], t1: [], t2: push(b.t2, c1)}
+
+fn buf_blocks(b):
+    var blks = flatten(b.t2) + b.t1
+    if len(b.t0) > 0:
+        blks = push(blks, b.t0)
+    return blks
+
+fn buf_last(b):
+    if len(b.t0) > 0:
+        return b.t0[len(b.t0) - 1]
+    if len(b.t1) > 0:
+        let blk = b.t1[len(b.t1) - 1]
+        return blk[len(blk) - 1]
+    if len(b.t2) > 0:
+        let g1 = b.t2[len(b.t2) - 1]
+        let g0 = g1[len(g1) - 1]
+        return g0[len(g0) - 1]
+    return nil
+
+fn buf_list(b):
+    return flatten(buf_blocks(b))
+
+fn buf_join(b, sep):
+    let blks = buf_blocks(b)
+    if len(blks) == 0:
+        return ""
+    return join(sep, [join(sep, blk) for blk in blks])
+
+fn str_buf_join(b):
+    return buf_join(b, "")
+
+fn unescape_text(raw):
+    let chars = list(raw)
+    let n = len(chars)
+    var b = buf_new()
+    var i = 0
+    while i < n:
+        let c = chars[i]
+        if c == "\\" and i + 1 < n:
+            let nxt = chars[i + 1]
+            let rep = ESC_MAP[nxt] ?? nxt
+            b = buf_push(b, rep)
+            i += 2
+        else:
+            b = buf_push(b, c)
+            i += 1
+    return str_buf_join(b)
+
+fn make_src_info(src, path):
+    let lines = split(src, "\n")
+    return {src: src, chars: list(src), n: len(src), lines: lines, path: path ?? "<input>"}
+
+fn site_of(t):
+    return {line: t.line, col: t.col, start: t.start, end: t.end}
+
+fn diag_err(src_info, site, msg, hint = nil):
+    var out = ""
+    if src_info != nil:
+        out = src_info.path
+    else:
+        out = "<input>"
+    if site != nil:
+        out = out + ":" + str(site.line) + ":" + str(site.col)
+    out = out + ": error: " + msg
+    if site != nil and src_info != nil:
+        let lines = src_info.lines
+        if site.line >= 1 and site.line <= len(lines):
+            let ln = lines[site.line - 1]
+            let lnum = text.pad_left(str(site.line), 5, " ")
+            var pad = site.col - 1
+            if pad < 0:
+                pad = 0
+            out = out + "\n  " + lnum + " | " + ln + "\n        | " + (" " * pad) + "^"
+    if hint != nil and hint != "":
+        out = out + "\n  hint: " + hint
+    fail("__THRUM_DIAG__\n" + out)

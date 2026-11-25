@@ -1,0 +1,3 @@
+30_irrational_exp_dim_error.thrum:2:10: error: exponent on dimensioned quantity must be rational
+      2 | let x = (2 m) ^ math.pi
+        |          ^

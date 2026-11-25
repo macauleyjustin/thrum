@@ -1,0 +1,56 @@
+# Signal processing, filtering, error metrics, and PID control helpers.
+
+# Clamp a dimensionless or compatible value into [0, 1].
+fn clamp01(x: num) -> num:
+    return clamp(x, 0, 1)
+
+# Zero out values whose magnitude is within +/- width.
+fn deadband(x: num, width: num) -> num:
+    if abs(x) <= width:
+        return x * 0
+    return x
+
+# Exponential moving average update step.
+fn ema(prev: num, sample: num, alpha: 1) -> num:
+    requires alpha >= 0 and alpha <= 1, "alpha must be in [0, 1]"
+    return prev + alpha * (sample - prev)
+
+# Simple moving average of a non-empty list.
+fn sma(xs: list) -> num:
+    requires len(xs) > 0, "sma needs a non-empty list"
+    return mean(xs)
+
+# First-order discrete low-pass filter with step dt and time constant tau.
+fn lowpass(prev: num, target: num, dt: s, tau: s) -> num:
+    requires dt >= 0 s and tau > 0 s
+    let alpha = dt / (tau + dt)
+    return prev + alpha * (target - prev)
+
+# Single discrete PID controller step returning updated state map {out, integral, prev_err}.
+fn pid_step(state: map, setpoint: num, measured: num, dt: s, gains: map) -> map:
+    requires dt > 0 s
+    let err = setpoint - measured
+    let prev_err = state.prev_err ?? err
+    let integ = (state.integral ?? (err * 0 s)) + err * dt
+    let deriv = (err - prev_err) / dt
+    let kp = gains.kp ?? 0
+    let ki = gains.ki ?? 0
+    let kd = gains.kd ?? 0
+    let out = kp * err + ki * integ + kd * deriv
+    return {out: out, integral: integ, prev_err: err}
+
+# Root mean squared error between predicted and actual lists.
+fn rmse(pred: list, actual: list) -> num:
+    requires len(pred) > 0 and len(pred) == len(actual), "equal non-empty lists required"
+    var acc = (pred[0] - actual[0])^2 * 0
+    for i in 0..<len(pred):
+        acc += (pred[i] - actual[i])^2
+    return sqrt(acc / len(pred))
+
+# Mean absolute error between predicted and actual lists.
+fn mae(pred: list, actual: list) -> num:
+    requires len(pred) > 0 and len(pred) == len(actual), "equal non-empty lists required"
+    var acc = abs(pred[0] - actual[0]) * 0
+    for i in 0..<len(pred):
+        acc += abs(pred[i] - actual[i])
+    return acc / len(pred)

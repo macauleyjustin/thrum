@@ -1,0 +1,3 @@
+60_postcondition_error.thrum:4:9: error: postcondition failed in bad: result > 0
+      4 | let y = bad(5)
+        |         ^

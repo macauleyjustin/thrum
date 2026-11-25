@@ -1,0 +1,2 @@
+with io:
+	io.say(1)

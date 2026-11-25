@@ -1,0 +1,4 @@
+record Force:
+    val: N
+
+let f = Force(5 kg)

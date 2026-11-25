@@ -1,0 +1,7 @@
+var flag = false
+fn pick(f):
+    if f: return a
+    return 0
+let b = pick(flag)
+let a = b + 1
+flag = true

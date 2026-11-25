@@ -1,0 +1,4 @@
+fn ke(m: kg, v: m/s) -> J:
+    return 0.5 * m * v^2
+fn uncalled():
+    return ke(2 m, 3 m/s)

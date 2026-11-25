@@ -1,0 +1,11 @@
+record Pt:
+    x: m
+    y: m = 0 m
+
+var p = Pt(3 m)
+let dist = sqrt(p.x^2 + p.y^2)
+let q = Pt{x: 6 m, y: 8 m}
+with io:
+    io.say("{type(p)} {dist} {p == Pt(3 m, 0 m)}")
+    p.y = 4 m
+    io.say("{dist} {q}")

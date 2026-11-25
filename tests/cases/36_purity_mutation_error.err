@@ -1,0 +1,4 @@
+36_purity_mutation_error.thrum:3:5: error: cannot mutate 'x' inside a relation
+      3 |     x = 99
+        |     ^
+  hint: relations must be pure; change inputs from an 'on' reaction or top level

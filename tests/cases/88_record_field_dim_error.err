@@ -1,0 +1,3 @@
+88_record_field_dim_error.thrum:4:9: error: field 'val' of Force should have dimension N, got kg
+      4 | let f = Force(5 kg)
+        |         ^

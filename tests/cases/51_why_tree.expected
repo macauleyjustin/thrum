@@ -1,0 +1,5 @@
+`- v = 0.666666666667 m/s   [relation, line 3]
+   a / b
+   |- a = 2 m   [input, line 1]
+   `- b = 3 s   [input, line 2]
+s = 5   (snapshot)

@@ -1,0 +1,5 @@
+var d = 100 ± 2 km
+var t = 2 ± 0.1 h
+let speed = d / t
+with io:
+    budget speed

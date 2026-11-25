@@ -1,0 +1,37 @@
+# Financial & compounding time-value-of-money calculations.
+
+use math
+
+# Discrete compound growth: principal * (1 + rate)^periods.
+fn compound(principal: num, rate: 1, periods: 1) -> num:
+    requires periods >= 0
+    return principal * (1 + rate)^periods
+
+# Continuous compound growth: principal * exp(rate * periods).
+fn continuous(principal: num, rate: 1, periods: 1) -> num:
+    return principal * math.exp(rate * periods)
+
+# Net present value of cashflows [cf0, cf1, ...] discounted at rate per period.
+fn npv(rate: 1, cashflows: list) -> num:
+    requires len(cashflows) > 0
+    var total = cashflows[0] * 0
+    for t in 0..<len(cashflows):
+        total += cashflows[t] / (1 + rate)^t
+    return total
+
+# Fixed periodic loan/annuity payment for principal over n periods at rate.
+fn pmt(principal: num, rate: 1, n: 1) -> num:
+    requires n > 0
+    if rate == 0:
+        return principal / n
+    return principal * rate / (1 - (1 + rate)^(-n))
+
+# Compound annual growth rate over periods.
+fn cagr(start_val: num, end_val: num, periods: 1) -> 1:
+    requires bare(start_val) > 0 and bare(end_val) > 0 and periods > 0
+    return (end_val / start_val)^(1 / periods) - 1
+
+# Sharpe ratio (mean(returns) - rf) / stdev(returns).
+fn sharpe(returns: list, rf: 1 = 0) -> 1:
+    requires len(returns) >= 2
+    return (mean(returns) - rf) / stdev(returns)

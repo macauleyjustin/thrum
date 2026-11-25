@@ -1,0 +1,4 @@
+84_check_assign_let_error.thrum:2:1: error: 'x' is a derived relation, not an input
+      2 | x = 20
+        | ^
+  hint: assign to its inputs instead, or declare it with 'var'

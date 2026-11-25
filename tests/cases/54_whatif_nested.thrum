@@ -1,0 +1,10 @@
+var a = 2
+var b = 3
+let c = a * b + 1
+with io:
+    whatif a = 10:
+        io.say(c)
+        whatif b = 5:
+            io.say(c)
+        io.say(c)
+    io.say(c)

@@ -1,0 +1,5 @@
+var x = 1
+fn bad(v):
+    x = 99
+    return v
+let y = bad(x)

@@ -1,0 +1,8 @@
+use regex
+with io:
+    io.say(regex.test(r"\d+", "abc123"))
+    let m = regex.search(r"([a-z]+)-(\d+)", "id: item-42!")
+    io.say("{m.text} {m.groups}")
+    io.say(regex.find_all(r"\d+", "a1 b22 c333"))
+    io.say(regex.replace(r"\s+", "-", "a   b\tc"))
+    io.say(regex.split("[,;]+", "a,b;;c"))

@@ -1,0 +1,9 @@
+with io:
+    io.say(1 mi as km)
+    io.say(60 mph as m/s)
+    io.say(1 cal as J)
+    io.say(1 atm as bar)
+    io.say(180 deg as rad)
+    io.say(25 pct)
+    io.say(4 byte as bit)
+    io.say(1 L as mL)

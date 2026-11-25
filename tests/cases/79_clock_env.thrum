@@ -1,0 +1,7 @@
+with io, clock, env:
+    let t0 = clock.mono()
+    clock.sleep(0 s)
+    let t1 = clock.mono()
+    io.say(t1 >= t0)
+    io.say(unit(clock.now()))
+    io.say(type(env.get("PATH")))

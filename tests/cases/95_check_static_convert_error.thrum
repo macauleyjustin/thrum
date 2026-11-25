@@ -1,0 +1,2 @@
+fn bad():
+    return 5 m as kg

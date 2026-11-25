@@ -1,0 +1,4 @@
+flowchart LR
+    c1["b = 6"]
+    c0(["a = 2"])
+    c0 --> c1

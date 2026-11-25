@@ -1,0 +1,10 @@
+var m = {[1]: "one", [5 m]: "five_m", "1": "str_one"}
+with io:
+    io.say(m[1])
+    io.say(m["1"])
+    io.say(m[500 cm])
+    io.say(1 in m)
+    io.say(2 in m)
+    m[1] = "ONE"
+    io.say("{m[1]} len={len(m)}")
+    io.say(type(keys(m)[0]))

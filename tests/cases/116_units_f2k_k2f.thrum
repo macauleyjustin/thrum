@@ -1,0 +1,4 @@
+use units
+with io:
+    io.say(units.f2k(32))
+    io.say(round(units.k2f(373.15 K), 2))

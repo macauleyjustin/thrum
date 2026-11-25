@@ -1,0 +1,19 @@
+use const
+
+var mass   = 72 ± 0.5 kg
+var height = 1.80 ± 0.02 m
+let bmi    = mass / height^2
+
+fn classify(b: kg/m^2) -> text:
+    requires b > 0 kg/m^2
+    if b < 18.5 kg/m^2: return "under"
+    elif b < 25 kg/m^2: return "normal"
+    else: return "over"
+
+with io:
+    io.say("BMI      : {bmi}  ({classify(bmi)})")
+    why bmi
+    budget bmi
+    whatif mass = 90 kg, height = 1.75 m:
+        io.say("what-if  : {bmi}")
+    io.say("untouched: {bmi}")

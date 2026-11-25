@@ -1,0 +1,6 @@
+with io:
+    io.say(1 km + 500 m)
+    io.say(1000 mg as g)
+    io.say(2 kHz * 3 s)
+    io.say(1000 µm as mm)
+    io.say(1 kohm * 2 mA)

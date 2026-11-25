@@ -1,0 +1,803 @@
+use "./util.thrum" as u
+use "./units.thrum" as un
+use "./lexer.thrum" as lx
+
+pin PREC = {
+    "or": 1, "and": 2,
+    "==": 4, "!=": 4, "<": 4, ">": 4, "<=": 4, ">=": 4, "~": 4, "in": 4, "notin": 4,
+    "??": 5, "|>": 6, "..": 7, "..<": 7, "+": 8, "-": 8, "*": 9, "/": 9, "%": 9,
+}
+
+pin KINDS = {
+    "num": true, "text": true, "bool": true, "list": true, "map": true,
+    "fn": true, "any": true, "module": true, "cap": true, "record": true,
+}
+
+pin NON_CONTRACT_OPS = {
+    "=": true, "+=": true, "-=": true, "*=": true, "/=": true, "^=": true, "%=": true,
+    "==": true, "!=": true, "<": true, "<=": true, ">": true, ">=": true,
+    "+": true, "-": true, "*": true, "/": true, "%": true, "^": true,
+    "??": true, "|>": true, "..": true, "..<": true, ")": true, ",": true,
+    ".": true, "[": true, ":": true, "(": true,
+}
+
+pin ASSIGN_OPS = {
+    "=": true, "+=": true, "-=": true, "*=": true, "/=": true, "^=": true, "%=": true,
+}
+
+fn _parse_tokens(toks, info, want_expr = false):
+    var idx = 0
+    var ntok = len(toks)
+    var rel = true
+    var in_fn = false
+
+    fn peek(k = 0):
+        var j = idx + k
+        if j >= ntok:
+            j = ntok - 1
+        return toks[j]
+
+    fn at(kind, val = nil):
+        let t = peek()
+        return t.kind == kind and (val == nil or t.val == val)
+
+    fn op(v):
+        let t = peek()
+        return (t.kind == "OP" or t.kind == "KW") and t.val == v
+
+    fn take(kind = nil, val = nil):
+        if kind != nil and not at(kind, val):
+            let t = peek()
+            var vs = ""
+            if val != nil:
+                vs = " '" + val + "'"
+            var got = t.kind
+            if t.val != nil:
+                got = str(t.val)
+            u.diag_err(info, u.site_of(t), "expected " + kind + vs + " but found " + got)
+        let t = peek()
+        idx += 1
+        return t
+
+    fn soft(w):
+        let t = peek()
+        if t.kind == "NAME" and t.val == w:
+            idx += 1
+            return true
+        return false
+
+    fn srcslice(a, b):
+        return slice(info.src, a, b)
+
+    fn template(raw, site):
+        let chars = list(raw)
+        let rn = len(chars)
+        var parts = u.buf_new()
+        var buf = u.buf_new()
+        var has_buf = false
+        var j = 0
+        while j < rn:
+            let c = chars[j]
+            if c == "\\" and j + 1 < rn:
+                let nxt = chars[j + 1]
+                buf = u.buf_push(buf, u.ESC_MAP[nxt] ?? nxt)
+                has_buf = true
+                j += 2
+                continue
+            if c == r"{":
+                var k = j + 1
+                var bdepth = 1
+                var q = nil
+                while k < rn:
+                    let ch = chars[k]
+                    if q != nil:
+                        if ch == "\\" and k + 1 < rn:
+                            k += 2
+                            continue
+                        if ch == q:
+                            q = nil
+                    elif ch == "\"" or ch == "'":
+                        q = ch
+                    elif ch == r"{":
+                        bdepth += 1
+                    elif ch == "}":
+                        bdepth -= 1
+                        if bdepth == 0:
+                            break
+                    k += 1
+                if k >= rn:
+                    u.diag_err(info, site, r"unterminated '{' in text")
+                if has_buf:
+                    parts = u.buf_push(parts, {t: "str", v: u.str_buf_join(buf)})
+                    buf = u.buf_new()
+                    has_buf = false
+                let inner = slice(raw, j + 1, k)
+                let sub_lx = lx.lex(inner, info.path)
+                let ex = _parse_tokens(sub_lx.toks, sub_lx.info, true)
+                parts = u.buf_push(parts, {t: "expr", v: ex})
+                j = k + 1
+                continue
+            buf = u.buf_push(buf, c)
+            has_buf = true
+            j += 1
+        if has_buf:
+            parts = u.buf_push(parts, {t: "str", v: u.str_buf_join(buf)})
+        return u.buf_list(parts)
+
+    fn typeann():
+        let t = peek()
+        if t.kind == "NAME" and t.val in KINDS:
+            take()
+            return {kind: "kind", name: t.val}
+        if t.kind == "KW" and t.val == "nil":
+            take()
+            return {kind: "kind", name: "nil"}
+        let r = un.scan_unit_chars(info.src, info.chars, info.n, t.start)
+        if r != nil:
+            while peek().kind != "EOF" and peek().start < r.end:
+                idx += 1
+            return {kind: "dim", dim: r.dim, sym: slice(info.src, t.start, r.end)}
+        if t.kind == "NAME":
+            var pts = [take("NAME").val]
+            while op("."):
+                take()
+                pts = push(pts, take("NAME").val)
+            return {kind: "record", short: pts[len(pts) - 1], full: join(".", pts)}
+        u.diag_err(info, u.site_of(t), "expected a type or unit here")
+
+    fn take_unit():
+        let t = peek()
+        let r = un.scan_unit_chars(info.src, info.chars, info.n, t.start)
+        if r == nil:
+            u.diag_err(info, u.site_of(t), "expected a unit here")
+        while peek().kind != "EOF" and peek().start < r.end:
+            idx += 1
+        return {sc: r.sc, dim: r.dim, sym: slice(info.src, t.start, r.end)}
+
+    fn block(new_rel = nil, new_fn = nil):
+        let old_rel = rel
+        let old_fn = in_fn
+        if new_rel != nil:
+            rel = new_rel
+        if new_fn != nil:
+            in_fn = new_fn
+        var body = u.buf_new()
+        if at("NEWLINE"):
+            take()
+            take("INDENT")
+            while not at("DEDENT") and not at("EOF"):
+                if at("NEWLINE"):
+                    take()
+                    continue
+                body = u.buf_push(body, stmt())
+            if at("DEDENT"):
+                take()
+        else:
+            body = u.buf_push(body, stmt())
+        rel = old_rel
+        in_fn = old_fn
+        return u.buf_list(body)
+
+    fn params():
+        take("OP", "(")
+        var ps = []
+        while not op(")"):
+            let nt = take("NAME")
+            var ty = nil
+            var df = nil
+            if op(":"):
+                take()
+                ty = typeann()
+            if op("="):
+                take()
+                df = expr()
+            ps = push(ps, {kind: "param", site: u.site_of(nt), name: nt.val, type: ty, default: df})
+            if not op(","):
+                break
+            take()
+        take("OP", ")")
+        return ps
+
+    fn map_pat_items():
+        take("OP", r"{")
+        var items = []
+        while not op("}"):
+            if at("TEXT"):
+                let key = u.unescape_text(take().val)
+                take("OP", ":")
+                items = push(items, {k: key, p: pattern()})
+            elif at("RAWTEXT"):
+                let key = take().val
+                take("OP", ":")
+                items = push(items, {k: key, p: pattern()})
+            else:
+                let kt = take("NAME")
+                let key = kt.val
+                if op(":"):
+                    take()
+                    items = push(items, {k: key, p: pattern()})
+                else:
+                    items = push(items, {k: key, p: {kind: "bind", name: key}})
+            if not op(","):
+                break
+            take()
+        take("OP", "}")
+        return items
+
+    fn pattern():
+        let t = peek()
+        if t.kind == "NAME" and t.val == "_":
+            take()
+            return {kind: "wild"}
+        if op("-"):
+            take()
+            let qt = take("QTY")
+            let qv = qt.val
+            return {kind: "lit", lkind: "num", val: {v: -qv.v, u: qv.u, disp: qv.disp, dim: qv.dim}}
+        if t.kind == "QTY":
+            take()
+            return {kind: "lit", lkind: "num", val: t.val}
+        if t.kind == "TEXT":
+            take()
+            return {kind: "lit", lkind: "str", val: u.unescape_text(t.val)}
+        if t.kind == "RAWTEXT":
+            take()
+            return {kind: "lit", lkind: "str", val: t.val}
+        if t.kind == "KW" and (t.val == "true" or t.val == "false" or t.val == "nil"):
+            take()
+            if t.val == "nil":
+                return {kind: "lit", lkind: "nil", val: nil}
+            return {kind: "lit", lkind: "bool", val: t.val == "true"}
+        if t.kind == "NAME":
+            let p1 = peek(1)
+            if p1.kind == "OP" and (p1.val == r"{" or p1.val == "."):
+                var pts = [take("NAME").val]
+                while op("."):
+                    take()
+                    pts = push(pts, take("NAME").val)
+                if op(r"{"):
+                    return {kind: "record", name: pts[len(pts) - 1], items: map_pat_items()}
+                u.diag_err(info, u.site_of(t), "bad pattern")
+            take()
+            return {kind: "bind", name: t.val}
+        if op(r"{"):
+            return {kind: "map", items: map_pat_items()}
+        if op("["):
+            take()
+            var items = []
+            var rest = nil
+            while not op("]"):
+                if op("*"):
+                    take()
+                    rest = take("NAME").val
+                    break
+                items = push(items, pattern())
+                if not op(","):
+                    break
+                take()
+            take("OP", "]")
+            return {kind: "list", items: items, rest: rest}
+        u.diag_err(info, u.site_of(t), "bad pattern")
+
+    fn map_entries():
+        take("OP", r"{")
+        var entries = []
+        while not op("}"):
+            var k = nil
+            if op("["):
+                take()
+                k = expr()
+                take("OP", "]")
+            elif at("TEXT"):
+                let tk = take()
+                let ks = u.site_of(tk)
+                k = {kind: "text", site: ks, parts: template(tk.val, ks)}
+            elif at("RAWTEXT"):
+                let tk = take()
+                k = {kind: "q", site: u.site_of(tk), lkind: "str", val: tk.val}
+            else:
+                let nt = take("NAME")
+                let ns = u.site_of(nt)
+                k = {kind: "q", site: ns, lkind: "str", val: nt.val}
+                if not op(":"):
+                    entries = push(entries, {k: k, v: {kind: "name", site: ns, name: nt.val}})
+                    if not op(","):
+                        break
+                    take()
+                    continue
+            take("OP", ":")
+            entries = push(entries, {k: k, v: expr()})
+            if not op(","):
+                break
+            take()
+        take("OP", "}")
+        return entries
+
+    fn atom():
+        let t = peek()
+        let s = u.site_of(t)
+        if t.kind == "QTY":
+            take()
+            return {kind: "q", site: s, lkind: "num", val: t.val}
+        if t.kind == "TEXT":
+            take()
+            return {kind: "text", site: s, parts: template(t.val, s)}
+        if t.kind == "RAWTEXT":
+            take()
+            return {kind: "q", site: s, lkind: "str", val: t.val}
+        if t.kind == "KW" and (t.val == "true" or t.val == "false" or t.val == "nil"):
+            take()
+            if t.val == "nil":
+                return {kind: "q", site: s, lkind: "nil", val: nil}
+            return {kind: "q", site: s, lkind: "bool", val: t.val == "true"}
+        if t.kind == "KW" and t.val == "fn":
+            take()
+            let ps = params()
+            var ret = nil
+            if op("->"):
+                take()
+                ret = typeann()
+            take("OP", ":")
+            let raw_body = block(false, true)
+            var req = []
+            var ens = []
+            var body = []
+            for st in raw_body:
+                if st.kind == "contract":
+                    if st.which == "requires":
+                        req = push(req, st)
+                    else:
+                        ens = push(ens, st)
+                else:
+                    body = push(body, st)
+            return {kind: "fnexpr", site: s, params: ps, ret: ret, body: body, requires: req, ensures: ens}
+        if t.kind == "NAME":
+            take()
+            return {kind: "name", site: s, name: t.val}
+        if op("("):
+            take()
+            let e = expr()
+            take("OP", ")")
+            return e
+        if op("\\"):
+            take()
+            return {kind: "lambda", site: s, body: expr()}
+        if op("["):
+            take()
+            if op("]"):
+                take()
+                return {kind: "list", site: s, items: []}
+            let first = expr()
+            if at("KW", "for"):
+                take()
+                let nm = take("NAME").val
+                take("KW", "in")
+                let it = expr()
+                var cond = nil
+                if at("KW", "if"):
+                    take()
+                    cond = expr()
+                take("OP", "]")
+                return {kind: "comp", site: s, elem: first, var_name: nm, iter: it, cond: cond}
+            var items = u.buf_new()
+            items = u.buf_push(items, first)
+            while op(","):
+                take()
+                if op("]"):
+                    break
+                items = u.buf_push(items, expr())
+            take("OP", "]")
+            return {kind: "list", site: s, items: u.buf_list(items)}
+        if op(r"{"):
+            return {kind: "map", site: s, entries: map_entries()}
+        var got = t.kind
+        if t.val != nil:
+            got = str(t.val)
+        u.diag_err(info, s, "unexpected " + got)
+
+    fn postfix():
+        var e = atom()
+        while true:
+            if op("("):
+                take()
+                var args = []
+                while not op(")"):
+                    args = push(args, expr())
+                    if not op(","):
+                        break
+                    take()
+                take("OP", ")")
+                e = {kind: "call", site: e.site, fn_expr: e, args: args}
+            elif op("["):
+                take()
+                var start_ex = nil
+                if not op(":"):
+                    start_ex = expr()
+                if op(":"):
+                    take()
+                    var stop_ex = nil
+                    if not op(":") and not op("]"):
+                        stop_ex = expr()
+                    var step_ex = nil
+                    if op(":"):
+                        take()
+                        if not op("]"):
+                            step_ex = expr()
+                    take("OP", "]")
+                    e = {kind: "slice", site: e.site, obj: e, start: start_ex, stop: stop_ex, step: step_ex}
+                else:
+                    take("OP", "]")
+                    e = {kind: "index", site: e.site, obj: e, idx: start_ex}
+            elif op(r"{"):
+                let entries = map_entries()
+                e = {kind: "rec_lit", site: e.site, target: e, entries: entries}
+            elif op("."):
+                take()
+                let t_mem = peek()
+                var nt = nil
+                if t_mem.kind == "NAME" or t_mem.kind == "KW":
+                    nt = take()
+                else:
+                    nt = take("NAME")
+                e = {kind: "dot", site: e.site, obj: e, name: nt.val}
+            elif op("as"):
+                take()
+                let ur = take_unit()
+                e = {kind: "convert", site: e.site, obj: e, unit: ur.sym, dim: ur.dim}
+            else:
+                break
+        return e
+
+    fn power():
+        let b = postfix()
+        if op("^"):
+            take()
+            return {kind: "bin", site: b.site, op: "^", left: b, right: unary()}
+        return b
+
+    fn unary():
+        let t = peek()
+        if op("-"):
+            take()
+            return {kind: "un", site: u.site_of(t), op: "-", operand: unary()}
+        if op("+"):
+            take()
+            return unary()
+        if op("not"):
+            take()
+            return {kind: "un", site: u.site_of(t), op: "not", operand: expr(3)}
+        return power()
+
+    fn expr(minp = 1):
+        var left = unary()
+        while true:
+            let t = peek()
+            var opc = nil
+            if t.kind == "OP" or t.kind == "KW":
+                let p1 = peek(1)
+                if t.val == "not" and p1.kind == "KW" and p1.val == "in":
+                    opc = "notin"
+                elif t.val in PREC:
+                    opc = t.val
+            if opc == nil or PREC[opc] < minp:
+                break
+            take()
+            if opc == "notin":
+                take()
+            var right = expr(PREC[opc] + 1)
+            if opc == "|>":
+                if right.kind == "call":
+                    right = {kind: "call", site: right.site, fn_expr: right.fn_expr, args: [left] + right.args}
+                elif right.kind == "name" or right.kind == "dot":
+                    right = {kind: "call", site: right.site, fn_expr: right, args: [left]}
+                else:
+                    u.diag_err(info, right.site, "right side of '|>' must be a call")
+                left = right
+            else:
+                left = {kind: "bin", site: left.site, op: opc, left: left, right: right}
+        return left
+
+    fn decl():
+        let kw = take().val
+        let nt = take("NAME")
+        let s = u.site_of(nt)
+        take("OP", "=")
+        let st = peek().start
+        let e = expr()
+        let en = toks[idx - 1].end
+        var init_ex = nil
+        if soft("init"):
+            init_ex = expr()
+        return {kind: "decl", site: s, kw: kw, name: nt.val, value: e, init: init_ex, src: srcslice(st, en), "live": rel}
+
+    fn recorddecl():
+        take()
+        let nt = take("NAME")
+        let s = u.site_of(nt)
+        take("OP", ":")
+        take("NEWLINE")
+        take("INDENT")
+        var fields = []
+        while not at("DEDENT") and not at("EOF"):
+            if at("NEWLINE"):
+                take()
+                continue
+            let ft = take("NAME")
+            let fs = u.site_of(ft)
+            var ty = nil
+            var df = nil
+            if op(":"):
+                take()
+                ty = typeann()
+            if op("="):
+                take()
+                df = expr()
+            fields = push(fields, {kind: "field", site: fs, name: ft.val, type: ty, default: df})
+            while at("NEWLINE"):
+                take()
+        if at("DEDENT"):
+            take()
+        if len(fields) == 0:
+            u.diag_err(info, s, "record '" + nt.val + "' must declare at least one field")
+        return {kind: "record", site: s, name: nt.val, fields: fields}
+
+    fn fndecl():
+        take()
+        let nt = take("NAME")
+        let s = u.site_of(nt)
+        let ps = params()
+        var ret = nil
+        if op("->"):
+            take()
+            ret = typeann()
+        take("OP", ":")
+        let raw_body = block(false, true)
+        var req = []
+        var ens = []
+        var body = []
+        for st in raw_body:
+            if st.kind == "contract":
+                if st.which == "requires":
+                    req = push(req, st)
+                else:
+                    ens = push(ens, st)
+            else:
+                body = push(body, st)
+        return {kind: "fndecl", site: s, name: nt.val, params: ps, ret: ret, body: body, requires: req, ensures: ens}
+
+    fn ifstmt():
+        let s = u.site_of(take())
+        let c = expr()
+        take("OP", ":")
+        let b = block()
+        var arms = [{cond: c, body: b}]
+        var els = nil
+        while at("KW", "elif"):
+            take()
+            let c2 = expr()
+            take("OP", ":")
+            arms = push(arms, {cond: c2, body: block()})
+        if at("KW", "else"):
+            take()
+            take("OP", ":")
+            els = block()
+        return {kind: "if", site: s, arms: arms, els: els}
+
+    fn matchstmt():
+        let s = u.site_of(take())
+        let subj = expr()
+        take("OP", ":")
+        take("NEWLINE")
+        take("INDENT")
+        var cases = []
+        while not at("DEDENT") and not at("EOF"):
+            if at("NEWLINE"):
+                take()
+                continue
+            take("KW", "case")
+            let pat = pattern()
+            var guard = nil
+            if at("KW", "if"):
+                take()
+                guard = expr()
+            take("OP", ":")
+            cases = push(cases, {pat: pat, guard: guard, body: block(false)})
+        if at("DEDENT"):
+            take()
+        return {kind: "match", site: s, subject: subj, cases: cases}
+
+    fn stmt():
+        let t = peek()
+        let s = u.site_of(t)
+        var k = nil
+        if t.kind == "KW":
+            k = t.val
+        let p1 = peek(1)
+        let p2 = peek(2)
+        var n = nil
+        if k == "var" or k == "let" or k == "pin":
+            n = decl()
+        elif k == "fn" and p1.kind == "NAME":
+            n = fndecl()
+        elif t.kind == "NAME" and t.val == "record" and p1.kind == "NAME" and p2.kind == "OP" and p2.val == ":":
+            n = recorddecl()
+        elif k == "if":
+            n = ifstmt()
+        elif k == "for":
+            take()
+            let a = take("NAME").val
+            var b = nil
+            if op(","):
+                take()
+                b = take("NAME").val
+            take("KW", "in")
+            let it = expr()
+            take("OP", ":")
+            n = {kind: "for", site: s, a: a, b: b, iter: it, body: block()}
+        elif k == "while":
+            take()
+            let c = expr()
+            take("OP", ":")
+            n = {kind: "while", site: s, cond: c, body: block()}
+        elif k == "repeat":
+            take()
+            let c = expr()
+            take("OP", ":")
+            n = {kind: "repeat", site: s, count: c, body: block()}
+        elif k == "match":
+            n = matchstmt()
+        elif k == "try":
+            take()
+            take("OP", ":")
+            let body = block()
+            take("KW", "catch")
+            let nm = take("NAME").val
+            take("OP", ":")
+            n = {kind: "try", site: s, body: body, name: nm, handler: block()}
+        elif k == "with":
+            take()
+            var caps = []
+            while true:
+                let nm = take("NAME").val
+                var args = []
+                if op("("):
+                    take()
+                    if not op(")"):
+                        args = push(args, expr())
+                        while op(","):
+                            take()
+                            args = push(args, expr())
+                    take("OP", ")")
+                caps = push(caps, {name: nm, args: args})
+                if not op(","):
+                    break
+                take()
+            take("OP", ":")
+            n = {kind: "with", site: s, caps: caps, body: block()}
+        elif k == "on":
+            take()
+            let st = peek().start
+            let c = expr()
+            let en = toks[idx - 1].end
+            var mode = "rise"
+            let pm = peek()
+            if pm.kind == "NAME" and (pm.val == "rise" or pm.val == "fall" or pm.val == "always"):
+                mode = take().val
+            take("OP", ":")
+            n = {kind: "on", site: s, cond: c, mode: mode, body: block(false), src: srcslice(st, en)}
+        elif k == "settle":
+            take()
+            var mx = 100
+            var tol = nil
+            if soft("max"):
+                mx = take("QTY").val.v
+            if soft("tol"):
+                tol = expr()
+            take("OP", ":")
+            n = {kind: "settle", site: s, maxit: mx, tol: tol, body: block(true)}
+        elif k == "live":
+            take()
+            take("OP", ":")
+            n = {kind: "live", site: s, body: block(true)}
+        elif k == "whatif":
+            take()
+            var pairs = []
+            while true:
+                let nm = take("NAME").val
+                take("OP", "=")
+                pairs = push(pairs, {name: nm, expr: expr()})
+                if not op(","):
+                    break
+                take()
+            take("OP", ":")
+            n = {kind: "whatif", site: s, pairs: pairs, body: block()}
+        elif k == "why" or k == "budget":
+            take()
+            let nm = take("NAME").val
+            n = {kind: k, site: s, name: nm}
+        elif k == "use":
+            take()
+            var mpath = nil
+            var mname = nil
+            var modpath = nil
+            if at("TEXT"):
+                mpath = u.unescape_text(take().val)
+            elif at("RAWTEXT"):
+                mpath = take().val
+            else:
+                var pts = [take("NAME").val]
+                while op("."):
+                    take()
+                    pts = push(pts, take("NAME").val)
+                if len(pts) == 1:
+                    mname = pts[0]
+                else:
+                    modpath = pts
+            var alias = nil
+            if op("as"):
+                take()
+                alias = take("NAME").val
+            n = {kind: "use", site: s, path: mpath, name: mname, modpath: modpath, alias: alias}
+        elif k == "return":
+            take()
+            var v = nil
+            if not at("NEWLINE") and not at("DEDENT") and not at("EOF"):
+                v = expr()
+            n = {kind: "return", site: s, value: v}
+        elif k == "break":
+            take()
+            n = {kind: "break", site: s}
+        elif k == "continue":
+            take()
+            n = {kind: "continue", site: s}
+        elif k == "fail":
+            take()
+            n = {kind: "fail", site: s, value: expr()}
+        elif k == "assert":
+            take()
+            let c = expr()
+            var m = nil
+            if op(","):
+                take()
+                m = expr()
+            n = {kind: "assert", site: s, cond: c, msg: m}
+        elif in_fn and t.kind == "NAME" and (t.val == "requires" or t.val == "ensures") and p1.kind != "NEWLINE" and p1.kind != "DEDENT" and p1.kind != "EOF" and not (p1.kind == "OP" and p1.val in NON_CONTRACT_OPS):
+            let w = take().val
+            let st = peek().start
+            let c = expr()
+            let en = toks[idx - 1].end
+            var m = nil
+            if op(","):
+                take()
+                m = expr()
+            n = {kind: "contract", site: s, which: w, cond: c, msg: m, src: srcslice(st, en)}
+        else:
+            let e = expr()
+            let pk = peek()
+            if pk.kind == "OP" and pk.val in ASSIGN_OPS:
+                let o = take().val
+                let v = expr()
+                n = {kind: "assign", site: s, target: e, op: o, value: v}
+            else:
+                n = {kind: "exprstmt", site: s, value: e}
+        while at("NEWLINE"):
+            take()
+        return n
+
+    if want_expr:
+        let ex = expr()
+        if not at("EOF") and not at("NEWLINE"):
+            u.diag_err(info, u.site_of(peek()), "unexpected trailing token in interpolation")
+        return ex
+
+    var out = u.buf_new()
+    while not at("EOF"):
+        if at("NEWLINE"):
+            take()
+            continue
+        out = u.buf_push(out, stmt())
+    return {body: u.buf_list(out), info: info}
+
+fn parse(src, path = "<input>"):
+    let res = lx.lex(src, path)
+    return _parse_tokens(res.toks, res.info, false)

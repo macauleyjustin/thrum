@@ -1,0 +1,5 @@
+use stat
+let xs = [x^2 for x in 1..<7 if x % 2 == 1]
+with io:
+    io.say(xs)
+    io.say(xs |> map(\it + 1) |> stat.mean)

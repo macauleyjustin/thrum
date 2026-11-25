@@ -1,0 +1,3 @@
+fn bad(x: kg) -> J:
+    return x
+let z = bad(1 kg)

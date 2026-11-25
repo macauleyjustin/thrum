@@ -1,0 +1,66 @@
+# Dimension-checked classical, orbital, thermal, and quantum physics formulas.
+
+use const
+use math
+
+# Kinetic energy: 0.5 * m * v^2.
+fn ke(m: kg, v: m/s) -> J:
+    requires m >= 0 kg, "mass must be non-negative"
+    return 0.5 * m * v^2
+
+# Gravitational potential energy near a surface: m * g * h.
+fn pe_grav(m: kg, h: m, g: m/s^2 = const.g0) -> J:
+    return m * g * h
+
+# Linear momentum: m * v.
+fn momentum(m: kg, v: m/s) -> kg*m/s:
+    return m * v
+
+# Newtonian gravitational force magnitude between two masses at distance r.
+fn grav_force(m1: kg, m2: kg, r: m) -> N:
+    requires r > 0 m, "separation must be positive"
+    return const.G * m1 * m2 / r^2
+
+# Escape velocity from mass m at radius r.
+fn escape_vel(m: kg, r: m) -> m/s:
+    requires m > 0 kg and r > 0 m
+    return sqrt(2 * const.G * m / r)
+
+# Keplerian circular orbital period around mass m at radius r.
+fn orbital_period(m: kg, r: m) -> s:
+    requires m > 0 kg and r > 0 m
+    return 2 * math.pi * sqrt(r^3 / (const.G * m))
+
+# Ideal gas pressure: P = n * R * T / V.
+fn ideal_gas_p(n: mol, temp: K, vol: m^3) -> Pa:
+    requires vol > 0 m^3 and temp >= 0 K
+    return n * const.R * temp / vol
+
+# Ohm's law current: I = V / R.
+fn ohms_i(v: V, r: ohm) -> A:
+    requires r > 0 ohm
+    return v / r
+
+# Electrical power: P = V * I.
+fn power_vi(v: V, i: A) -> W:
+    return v * i
+
+# Photon energy: E = h * f.
+fn photon_energy(freq: Hz) -> J:
+    requires freq >= 0 Hz
+    return const.h * freq
+
+# de Broglie wavelength: lambda = h / (m * v).
+fn de_broglie(m: kg, v: m/s) -> m:
+    requires m > 0 kg and v > 0 m/s
+    return const.h / (m * v)
+
+# Small-angle simple pendulum period: 2 * pi * sqrt(L / g).
+fn pendulum_period(length: m, g: m/s^2 = const.g0) -> s:
+    requires length >= 0 m and g > 0 m/s^2
+    return 2 * math.pi * sqrt(length / g)
+
+# Special-relativistic Lorentz factor gamma.
+fn lorentz_gamma(v: m/s) -> 1:
+    requires abs(v) < const.c, "speed must be strictly below c"
+    return 1 / sqrt(1 - (v / const.c)^2)

@@ -1,0 +1,5 @@
+with io:
+    io.say(floor(5.7 ft))
+    io.say(ceil(5.2 ft))
+    io.say(round(123.456 cm, 1))
+    io.say(fix(3.14159 m, 2))

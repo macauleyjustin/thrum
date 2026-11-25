@@ -1,0 +1,7 @@
+var m = 3
+with io:
+    io.say(5 * m)
+    io.say(5 m)
+    io.say(10 m/s^2)
+    io.say((10 m) / (2 s)^2)
+    io.say(5 m / 2)

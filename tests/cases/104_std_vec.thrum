@@ -1,0 +1,11 @@
+use std.vec
+let a = vec.vec2(3 m, 4 m)
+let b = vec.vec2(1 m, -1 m)
+let c = vec.vec3(1, 0, 0)
+let d = vec.vec3(0, 1, 0)
+with io:
+    io.say(vec.mag2(a))
+    io.say(vec.add2(a, b))
+    io.say(vec.dot2(a, b))
+    io.say(vec.cross3(c, d))
+    io.say(vec.dist2(a, vec.vec2(0 m, 0 m)))

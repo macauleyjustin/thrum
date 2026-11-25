@@ -1,0 +1,4 @@
+38_assign_to_let_error.thrum:3:1: error: 'b' is a derived relation, not an input
+      3 | b = 5
+        | ^
+  hint: assign to its inputs instead, or declare it with 'var'

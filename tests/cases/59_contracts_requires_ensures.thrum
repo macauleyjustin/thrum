@@ -1,0 +1,11 @@
+fn pos_dbl(x: num) -> num:
+    requires x > 0, "must be positive"
+    ensures result == x * 2
+    return x * 2
+let f = fn(x: num) -> num:
+    requires x >= 0
+    ensures result >= 0
+    return x + 1
+with io:
+    io.say(pos_dbl(5))
+    io.say(f(3))

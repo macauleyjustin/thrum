@@ -1,0 +1,4 @@
+35_cycle_error.thrum:5:5: error: cyclic relation involving 'b'
+      5 | let b = pick(flag)
+        |     ^
+  hint: wrap mutually-recursive relations in a 'settle' block with 'init' seeds

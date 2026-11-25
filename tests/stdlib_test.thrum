@@ -1,0 +1,61 @@
+# Project-level *_test.thrum verification suite for Thrum stdlib & language.
+use test
+use std.vec
+use std.physics
+use std.signal
+use std.finance
+use std.matrix
+use json
+use csv
+use text
+use regex
+use time
+use list
+use map
+
+fn t_vec2():
+    let a = vec.vec2(3 m, 4 m)
+    test.eq(vec.mag2(a), 5 m)
+    test.eq(vec.dot2(a, a), 25 m^2)
+
+fn t_physics():
+    test.eq(physics.ke(2 kg, 4 m/s), 16 J)
+    test.eq(physics.ohms_i(10 V, 2 ohm), 5 A)
+
+fn t_signal():
+    test.eq(signal.ema(0 m, 10 m, 0.5), 5 m)
+    test.eq(signal.mae([1 m, 3 m], [2 m, 1 m]), 1.5 m)
+
+fn t_finance():
+    test.approx(finance.cagr(100, 121, 2), 0.1)
+
+fn t_matrix():
+    test.eq(matrix.solve2([[1, 1], [1, -1]], [10, 2]), [6, 4])
+
+fn t_json_csv():
+    let q = 42 ± 0.5 N
+    let decoded = json.parse_qty(json.stringify_qty(q))
+    test.approx(decoded, q)
+    let rows = csv.parse_nums("a,b\n10 m,2 s")
+    test.eq(rows[0].a / rows[0].b, 5 m/s)
+
+fn t_text_regex_time():
+    test.eq(text.pad_left("9", 3, "0"), "009")
+    test.ok(regex.test("^th.+m$", "thrum"))
+    test.eq(time.format_dur(3661 s), "1h 1m 1s")
+
+fn t_list_map():
+    test.eq(list.chunk([1, 2, 3, 4], 2), [[1, 2], [3, 4]])
+    test.eq(map.pick({a: 1, b: 2}, ["b"]), {b: 2})
+
+test.run("vec2 math", t_vec2)
+test.run("physics dimensions", t_physics)
+test.run("signal metrics", t_signal)
+test.run("finance cagr", t_finance)
+test.run("matrix solve2", t_matrix)
+test.run("json + csv roundtrip", t_json_csv)
+test.run("text + regex + time", t_text_regex_time)
+test.run("list + map", t_list_map)
+
+let res = test.summary()
+assert res.total == 8 and res.failed == 0, "stdlib tests had failures"

@@ -1,0 +1,2 @@
+49_on_cascade_limit_error.thrum: error: reaction cascade exceeded 1000 rounds
+  hint: a reaction is probably feeding its own input

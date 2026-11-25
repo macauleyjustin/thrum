@@ -1,0 +1,7 @@
+use stat
+let fit = stat.linfit([1 s, 2 s, 3 s], [2 m, 4 m, 6 m])
+with io:
+    io.say(fit.slope)
+    io.say(fit.intercept)
+    io.say(fit.r2)
+    io.say(fit.n)

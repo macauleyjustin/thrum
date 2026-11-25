@@ -1,0 +1,3 @@
+57_dim_param_error.thrum:3:9: error: parameter 'm' should have dimension kg, got m
+      3 | let x = ke(2 m, 3 m/s)
+        |         ^

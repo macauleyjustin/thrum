@@ -1,0 +1,15 @@
+var mode = true
+var x = 10
+var y = 100
+fn choose(m, a, b):
+    if m: return x
+    return y
+let out = choose(mode, x, y)
+with io:
+    io.say(out)
+    y = 200
+    io.say(out)
+    mode = false
+    io.say(out)
+    x = 99
+    io.say(out)

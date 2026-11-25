@@ -1,0 +1,4 @@
+fn calc(init: num, max: num, tol: num, rise: num, fall: num, always: num, requires: num, ensures: num) -> num:
+    return init + max + tol + rise + fall + always + requires + ensures
+with io:
+    io.say(calc(1, 2, 3, 4, 5, 6, 7, 8))

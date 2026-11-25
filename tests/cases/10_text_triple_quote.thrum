@@ -1,0 +1,8 @@
+let who = "Thrum"
+let msg = """line1
+hello {who}"""
+let raw = '''single
+line'''
+with io:
+    io.say(msg)
+    io.say(raw)

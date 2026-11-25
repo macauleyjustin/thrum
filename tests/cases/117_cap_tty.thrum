@@ -1,0 +1,6 @@
+with tty, io:
+    let sz = tty.size()
+    io.say(sz.cols > 0 and sz.rows > 0)
+    io.say(tty.is_tty())
+    io.say(isnil(tty.poll_key(0 s)))
+    tty.write("ok\n")

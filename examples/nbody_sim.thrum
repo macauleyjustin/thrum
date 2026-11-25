@@ -1,0 +1,30 @@
+# Two-body orbital showcase using records, std.vec, std.physics, and reactive tracking.
+use const
+use std.vec
+use std.physics
+
+record Satellite:
+    name: text
+    mass: kg
+    radius: m
+    vel: vec.Vec2
+
+var altitude = 400 ± 5 km
+let orbit_r = const.R_earth + altitude
+let v_orb = sqrt(const.G * const.M_earth / orbit_r)
+let sat = Satellite{
+    name: "ISS",
+    mass: 420000 kg,
+    radius: orbit_r,
+    vel: vec.vec2(0 m/s, v_orb),
+}
+let energy = physics.ke(sat.mass, vec.mag2(sat.vel))
+let period = physics.orbital_period(const.M_earth, sat.radius)
+
+with io:
+    io.say("Satellite: {sat.name}  speed={vec.mag2(sat.vel) as km/s}  KE={energy as GJ}  T={period as min}")
+    budget period
+    whatif altitude = 35786 km:
+        io.say("GEO orbit: speed={vec.mag2(sat.vel) as km/s}  T={period as h}")
+    altitude = 550 ± 2 km
+    io.say("Boosted  : speed={vec.mag2(sat.vel) as km/s}  T={period as min}")

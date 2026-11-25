@@ -1,0 +1,5 @@
+with io, args:
+    io.say(args.len())
+    io.say(args.all())
+    io.say(args.get(0))
+    io.say(args.get(9, "none"))

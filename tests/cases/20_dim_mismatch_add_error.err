@@ -1,0 +1,4 @@
+20_dim_mismatch_add_error.thrum:1:9: error: dimension mismatch: m + s
+      1 | let x = 1 m + 1 s
+        |         ^
+  hint: convert with 'as', or check your units — Thrum never guesses

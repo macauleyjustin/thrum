@@ -1,0 +1,4 @@
+39_assign_to_local_let_error.thrum:3:5: error: cannot assign to immutable 'x'
+      3 |     x = 2
+        |     ^
+  hint: declare it with 'var' if it needs to change

@@ -1,0 +1,3 @@
+77_fs_escape_error.thrum:2:15: error: path escapes the granted root '<SANDBOX>'
+      2 |     let txt = fs.read("../hello.txt")
+        |               ^

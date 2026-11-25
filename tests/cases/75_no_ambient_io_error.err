@@ -1,0 +1,3 @@
+75_no_ambient_io_error.thrum:1:1: error: undefined name 'io'
+      1 | io.say("hi")
+        | ^

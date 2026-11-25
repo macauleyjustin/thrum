@@ -1,0 +1,27 @@
+# End-to-end scientific data pipeline using csv, stat, json, time, and io.table.
+use csv
+use stat
+use json
+use time
+
+let raw_csv = """trial,mass,accel
+1,2.00 ± 0.05 kg,4.90 ± 0.10 m/s^2
+2,2.00 ± 0.05 kg,5.05 ± 0.08 m/s^2
+3,2.00 ± 0.05 kg,4.98 ± 0.12 m/s^2"""
+
+let rows = csv.parse_nums(raw_csv)
+var forces = [r.mass * r.accel for r in rows]
+let f_est = stat.weighted_mean(forces)
+let report_tbl = [
+    {metric: "mean_force", value: str(f_est), dim: dim(f_est)},
+    {metric: "trials", value: str(len(rows)), dim: "1"},
+    {metric: "duration", value: time.format_dur(135 s), dim: "s"},
+]
+
+with io:
+    io.say("Measured forces:")
+    io.table(rows)
+    io.say("")
+    io.say("Weighted estimate: {f_est}")
+    io.table(report_tbl)
+    io.say("JSON export: " + json.stringify({force_N: f_est, trials: len(rows)}))

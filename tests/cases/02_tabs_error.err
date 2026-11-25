@@ -1,0 +1,4 @@
+02_tabs_error.thrum:2:1: error: tabs are not allowed for indentation
+      2 | 	io.say(1)
+        | ^
+  hint: use spaces

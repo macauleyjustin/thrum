@@ -1,0 +1,93 @@
+# Dimension-aware 2D matrix operations on nested lists.
+
+# Create a rows x cols matrix of zeros.
+fn zeros(rows: 1, cols: 1) -> list:
+    requires rows >= 1 and cols >= 1
+    return [[0 for c in 0..<cols] for r in 0..<rows]
+
+# Create an n x n identity matrix.
+fn eye(n: 1) -> list:
+    requires n >= 1
+    var out = []
+    for r in 0..<n:
+        var row = []
+        for c in 0..<n:
+            if r == c:
+                row = push(row, 1)
+            else:
+                row = push(row, 0)
+        out = push(out, row)
+    return out
+
+# Return [rows, cols] shape of a rectangular matrix.
+fn shape(m: list) -> list:
+    requires len(m) > 0
+    return [len(m), len(m[0])]
+
+# Transpose a matrix.
+fn transpose(m: list) -> list:
+    requires len(m) > 0 and len(m[0]) > 0
+    let rows = len(m)
+    let cols = len(m[0])
+    return [[m[r][c] for r in 0..<rows] for c in 0..<cols]
+
+# Element-wise matrix addition.
+fn add(a: list, b: list) -> list:
+    requires len(a) == len(b) and len(a) > 0 and len(a[0]) == len(b[0])
+    let rows = len(a)
+    let cols = len(a[0])
+    return [[a[r][c] + b[r][c] for c in 0..<cols] for r in 0..<rows]
+
+# Scale every entry of a matrix by scalar s.
+fn scale(m: list, s: num) -> list:
+    return [[cell * s for cell in row] for row in m]
+
+# Matrix multiplication A * B.
+fn matmul(a: list, b: list) -> list:
+    requires len(a) > 0 and len(b) > 0 and len(a[0]) == len(b), "inner dimensions must match"
+    let r = len(a)
+    let k = len(a[0])
+    let c = len(b[0])
+    var out = []
+    for i in 0..<r:
+        var row = []
+        for j in 0..<c:
+            var acc = a[i][0] * b[0][j]
+            for p in 1..<k:
+                acc += a[i][p] * b[p][j]
+            row = push(row, acc)
+        out = push(out, row)
+    return out
+
+# Matrix-vector multiplication M * v.
+fn matvec(m: list, v: list) -> list:
+    requires len(m) > 0 and len(m[0]) == len(v), "matrix cols must match vector len"
+    var out = []
+    for row in m:
+        var acc = row[0] * v[0]
+        for j in 1..<len(v):
+            acc += row[j] * v[j]
+        out = push(out, acc)
+    return out
+
+# Matrix trace (sum of main diagonal).
+fn trace(m: list) -> num:
+    requires len(m) > 0 and len(m) == len(m[0]), "trace requires a square matrix"
+    var acc = m[0][0]
+    for i in 1..<len(m):
+        acc += m[i][i]
+    return acc
+
+# Determinant of a 2x2 matrix.
+fn det2(m: list) -> num:
+    requires len(m) == 2 and len(m[0]) == 2 and len(m[1]) == 2
+    return m[0][0] * m[1][1] - m[0][1] * m[1][0]
+
+# Solve a 2x2 linear system M * x = b using Cramer's rule.
+fn solve2(m: list, b: list) -> list:
+    requires len(m) == 2 and len(b) == 2
+    requires bare(det2(m)) != 0, "singular 2x2 matrix"
+    let d = det2(m)
+    let x0 = (b[0] * m[1][1] - m[0][1] * b[1]) / d
+    let x1 = (m[0][0] * b[1] - b[0] * m[1][0]) / d
+    return [x0, x1]

@@ -1,0 +1,7 @@
+use "./_helper_lib.thrum" as lib
+var price = 100
+let total = price + lib.tax(price)
+with io:
+    io.say(total)
+    lib.rate = 0.25
+    io.say(total)

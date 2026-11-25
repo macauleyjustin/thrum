@@ -1,0 +1,11 @@
+var t = 0
+with io:
+    on t > 10 rise:
+        io.say("rise {t}")
+    on t > 10 fall:
+        io.say("fall {t}")
+    on t > 10 always:
+        io.say("always {t}")
+    t = 15
+    t = 20
+    t = 5

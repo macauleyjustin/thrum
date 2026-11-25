@@ -1,0 +1,2 @@
+with fs("./sandbox"):
+    let txt = fs.read("../hello.txt")

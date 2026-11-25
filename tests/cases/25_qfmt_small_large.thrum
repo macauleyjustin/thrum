@@ -1,0 +1,7 @@
+use const
+with io:
+    io.say(const.G)
+    io.say(const.me)
+    io.say(qty(0, "m", 1e-10))
+    io.say(5.0 ± 1e-8 m)
+    io.say(1.23e6 ± 1e2 m)

@@ -1,0 +1,4 @@
+55_whatif_mutation_error.thrum:4:5: error: cannot mutate 'a' inside a relation
+      4 |     a = 9
+        |     ^
+  hint: relations must be pure; change inputs from an 'on' reaction or top level

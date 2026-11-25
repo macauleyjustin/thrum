@@ -1,0 +1,6 @@
+with io, rand(7):
+    let xs = [1, 2, 3, 4]
+    io.say(rand.shuffle(xs))
+    io.say(rand.sample(xs, 2))
+    let g = rand.gauss(100 m, 2 m)
+    io.say("{dim(g)} {round(g, 3)}")

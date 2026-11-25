@@ -1,0 +1,8 @@
+var k = 10
+settle max 80 tol 1e-12:
+    let a = (b + k) / 3 init 0
+    let b = (a + 4) / 2 init 0
+with io:
+    io.say("{round(a, 6)}, {round(b, 6)}")
+    k = 20
+    io.say("{round(a, 6)}, {round(b, 6)}")

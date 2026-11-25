@@ -1,0 +1,132 @@
+(* Thrum v0.2 Normative Grammar (ISO EBNF) *)
+
+program     = { NEWLINE | stmt } EOF ;
+
+stmt        = ( decl
+              | record_decl
+              | fndecl
+              | if_stmt
+              | for_stmt
+              | while_stmt
+              | repeat_stmt
+              | match_stmt
+              | try_stmt
+              | with_stmt
+              | on_stmt
+              | settle_stmt
+              | live_stmt
+              | whatif_stmt
+              | why_stmt
+              | budget_stmt
+              | use_stmt
+              | return_stmt
+              | "break"
+              | "continue"
+              | "fail" expr
+              | assert_stmt
+              | contract_stmt
+              | assign_or_expr
+              ) stmt_end ;
+
+stmt_end    = { NEWLINE | ";" } ;
+block       = NEWLINE INDENT { NEWLINE | stmt } DEDENT
+            | stmt ;
+
+decl        = ( "var" | "let" | "pin" ) NAME "=" expr [ "init" expr ] ;
+assign_or_expr
+            = expr [ ( "=" | "+=" | "-=" | "*=" | "/=" | "^=" | "%=" ) expr ] ;
+
+record_decl = "record" NAME ":" NEWLINE INDENT { NEWLINE | field_decl } DEDENT ;
+field_decl  = NAME [ ":" type_ann ] [ "=" expr ] ;
+
+fndecl      = "fn" NAME "(" [ params ] ")" [ "->" type_ann ] ":" block ;
+params      = param { "," param } ;
+param       = NAME [ ":" type_ann ] [ "=" expr ] ;
+type_ann    = KIND_NAME | "nil" | UNIT_EXPR | NAME { "." NAME } ;
+
+if_stmt     = "if" expr ":" block { "elif" expr ":" block } [ "else" ":" block ] ;
+for_stmt    = "for" NAME [ "," NAME ] "in" expr ":" block ;
+while_stmt  = "while" expr ":" block ;
+repeat_stmt = "repeat" expr ":" block ;
+
+match_stmt  = "match" expr ":" NEWLINE INDENT { NEWLINE | case_arm } DEDENT ;
+case_arm    = "case" pattern [ "if" expr ] ":" block ;
+pattern     = "_"
+            | [ "-" ] QTY
+            | ( TEXT | RAWTEXT )
+            | "true" | "false" | "nil"
+            | NAME { "." NAME } "{" [ map_pat { "," map_pat } ] "}"
+            | NAME
+            | "{" [ map_pat { "," map_pat } ] "}"
+            | "[" [ list_pat ] "]" ;
+map_pat     = ( NAME | TEXT ) [ ":" pattern ] ;
+list_pat    = "*" NAME
+            | pattern { "," pattern } [ "," "*" NAME ] ;
+
+try_stmt    = "try" ":" block "catch" NAME ":" block ;
+with_stmt   = "with" cap_spec { "," cap_spec } ":" block ;
+cap_spec    = NAME [ "(" [ arg_list ] ")" ] ;
+
+on_stmt     = "on" expr [ "rise" | "fall" | "always" ] ":" block ;
+settle_stmt = "settle" [ "max" QTY ] [ "tol" expr ] ":" block ;
+live_stmt   = "live" ":" block ;
+whatif_stmt = "whatif" NAME "=" expr { "," NAME "=" expr } ":" block ;
+
+why_stmt    = "why" NAME ;
+budget_stmt = "budget" NAME ;
+use_stmt    = "use" ( TEXT | RAWTEXT | NAME { "." NAME } ) [ "as" NAME ] ;
+return_stmt = "return" [ expr ] ;
+assert_stmt = "assert" expr [ "," expr ] ;
+contract_stmt
+            = ( "requires" | "ensures" ) expr [ "," expr ] ; (* inside fn blocks *)
+
+(* Expressions — lowest to highest precedence *)
+expr        = or_expr ;
+or_expr     = and_expr { "or" and_expr } ;
+and_expr    = not_expr { "and" not_expr } ;
+not_expr    = "not" not_expr | cmp_expr ;
+cmp_expr    = coalesce { ( "==" | "!=" | "<" | "<=" | ">" | ">=" | "~" | "in" | "not" "in" ) coalesce } ;
+coalesce    = pipe_expr { "??" pipe_expr } ;
+pipe_expr   = range_expr { "|>" range_expr } ;
+range_expr  = sum_expr { ( ".." | "..<" ) sum_expr } ;
+sum_expr    = prod_expr { ( "+" | "-" ) prod_expr } ;
+prod_expr   = unary_expr { ( "*" | "/" | "%" ) unary_expr } ;
+unary_expr  = ( "-" | "+" ) unary_expr | power_expr ;
+power_expr  = postfix [ "^" unary_expr ] ;
+
+postfix     = atom { "(" [ arg_list ] ")"
+                   | "[" [ expr ] ":" [ expr ] [ ":" [ expr ] ] "]"
+                   | "[" expr "]"
+                   | "{" [ map_entry { "," map_entry } [ "," ] ] "}"
+                   | "." NAME
+                   | "as" UNIT_EXPR } ;
+arg_list    = expr { "," expr } ;
+
+atom        = QTY
+            | TEXT
+            | RAWTEXT
+            | "true" | "false" | "nil"
+            | NAME
+            | "(" expr ")"
+            | "\\" expr
+            | "fn" "(" [ params ] ")" [ "->" type_ann ] ":" block
+            | list_lit
+            | map_lit ;
+
+list_lit    = "[" [ "]"
+                  | expr "for" NAME "in" expr [ "if" expr ] "]"
+                  | expr { "," expr } [ "," ] "]" ] ;
+
+map_lit     = "{" [ map_entry { "," map_entry } [ "," ] ] "}" ;
+map_entry   = "[" expr "]" ":" expr
+            | ( TEXT | RAWTEXT ) ":" expr
+            | NAME [ ":" expr ] ;
+
+(* Lexical productions *)
+KIND_NAME   = "num" | "text" | "bool" | "list" | "map" | "fn" | "any" | "module" | "cap" | "record" ;
+QTY         = NUMBER [ ( "±" | "+/-" ) NUMBER ] [ UNIT_EXPR ] ;
+UNIT_EXPR   = unit_term { ( "*" | "/" | "·" ) unit_term } ; (* no spaces within UNIT_EXPR *)
+unit_term   = "(" UNIT_EXPR ")"
+            | "1"
+            | UNIT_IDENT [ "^" ( UNIT_EXP | "(" UNIT_EXP ")" ) ] ;
+UNIT_EXP    = [ "+" | "-" ] DIGITS [ "/" DIGITS ] ;

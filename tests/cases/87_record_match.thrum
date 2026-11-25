@@ -1,0 +1,11 @@
+use std.vec
+let a = vec.Vec2(3 m, 4 m)
+let b = vec.Vec3(1, 2, 3)
+fn show(v):
+    match v:
+        case vec.Vec2{x, y}: return "2d:{x},{y}"
+        case vec.Vec3{x, y, z}: return "3d:{x},{y},{z}"
+        case _: return "other"
+with io:
+    io.say(show(a))
+    io.say(show(b))

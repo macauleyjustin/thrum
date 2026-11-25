@@ -1,0 +1,304 @@
+use math
+use "./util.thrum" as u
+
+pin BASE_NAMES = ["m", "kg", "s", "A", "K", "mol", "cd"]
+
+fn frac(n, d = 1):
+    if n == 0:
+        return [0, 1]
+    var a = n
+    var b = d
+    if b < 0:
+        a = -a
+        b = -b
+    let g = math.gcd(abs(a), b)
+    if g > 1:
+        a = a / g
+        b = b / g
+    return [a, b]
+
+fn fadd(a, b):
+    return frac(a[0] * b[1] + b[0] * a[1], a[1] * b[1])
+
+fn fsub(a, b):
+    return frac(a[0] * b[1] - b[0] * a[1], a[1] * b[1])
+
+fn fmul(a, b):
+    return frac(a[0] * b[0], a[1] * b[1])
+
+fn fneg(a):
+    return [-a[0], a[1]]
+
+fn feq(a, b):
+    return a[0] == b[0] and a[1] == b[1]
+
+fn fval(a):
+    return a[0] / a[1]
+
+fn fstr(a):
+    if a[1] == 1:
+        return str(a[0])
+    return str(a[0]) + "/" + str(a[1])
+
+pin D0 = [[0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1]]
+
+fn mk_dim(sp):
+    return [frac(sp.m ?? 0), frac(sp.kg ?? 0), frac(sp.s ?? 0), frac(sp.a ?? 0), frac(sp.k ?? 0), frac(sp.mol ?? 0), frac(sp.cd ?? 0)]
+
+fn dadd(a, b):
+    return [fadd(a[0], b[0]), fadd(a[1], b[1]), fadd(a[2], b[2]), fadd(a[3], b[3]), fadd(a[4], b[4]), fadd(a[5], b[5]), fadd(a[6], b[6])]
+
+fn dsub(a, b):
+    return [fsub(a[0], b[0]), fsub(a[1], b[1]), fsub(a[2], b[2]), fsub(a[3], b[3]), fsub(a[4], b[4]), fsub(a[5], b[5]), fsub(a[6], b[6])]
+
+fn dscale(a, f):
+    return [fmul(a[0], f), fmul(a[1], f), fmul(a[2], f), fmul(a[3], f), fmul(a[4], f), fmul(a[5], f), fmul(a[6], f)]
+
+fn dimless(d):
+    return d[0][0] == 0 and d[1][0] == 0 and d[2][0] == 0 and d[3][0] == 0 and d[4][0] == 0 and d[5][0] == 0 and d[6][0] == 0
+
+fn deq(a, b):
+    var i = 0
+    while i < 7:
+        if a[i][0] != b[i][0] or a[i][1] != b[i][1]:
+            return false
+        i += 1
+    return true
+
+fn dim_key(d):
+    return join(",", [fstr(d[0]), fstr(d[1]), fstr(d[2]), fstr(d[3]), fstr(d[4]), fstr(d[5]), fstr(d[6])])
+
+fn _build_unit_tables():
+    var units = {}
+    var prefs = []
+    var specs = [
+        ["m", 1, mk_dim({m: 1}), true, ["meter", "meters", "metre", "metres"]],
+        ["g", 1e-3, mk_dim({kg: 1}), true, ["gram", "grams"]],
+        ["s", 1, mk_dim({s: 1}), true, ["sec", "secs", "second", "seconds"]],
+        ["A", 1, mk_dim({a: 1}), true, ["amp", "amps", "ampere", "amperes"]],
+        ["K", 1, mk_dim({k: 1}), true, ["kelvin"]],
+        ["mol", 1, mk_dim({mol: 1}), true, ["mole", "moles"]],
+        ["cd", 1, mk_dim({cd: 1}), true, ["candela"]],
+        ["N", 1, mk_dim({kg: 1, m: 1, s: -2}), true, ["newton", "newtons"]],
+        ["Pa", 1, mk_dim({kg: 1, m: -1, s: -2}), true, ["pascal", "pascals"]],
+        ["J", 1, mk_dim({kg: 1, m: 2, s: -2}), true, ["joule", "joules"]],
+        ["W", 1, mk_dim({kg: 1, m: 2, s: -3}), true, ["watt", "watts"]],
+        ["C", 1, mk_dim({a: 1, s: 1}), true, ["coulomb", "coulombs"]],
+        ["V", 1, mk_dim({kg: 1, m: 2, s: -3, a: -1}), true, ["volt", "volts"]],
+        ["F", 1, mk_dim({kg: -1, m: -2, s: 4, a: 2}), true, ["farad", "farads"]],
+        ["H", 1, mk_dim({kg: 1, m: 2, s: -2, a: -2}), true, ["henry", "henries"]],
+        ["S", 1, mk_dim({kg: -1, m: -2, s: 3, a: 2}), true, ["siemens"]],
+        ["Hz", 1, mk_dim({s: -1}), true, ["hertz"]],
+        ["Wb", 1, mk_dim({kg: 1, m: 2, s: -2, a: -1}), true, ["weber", "webers"]],
+        ["T", 1, mk_dim({kg: 1, s: -2, a: -1}), true, ["tesla", "teslas"]],
+        ["lm", 1, mk_dim({cd: 1}), true, ["lumen", "lumens"]],
+        ["lx", 1, mk_dim({cd: 1, m: -2}), true, ["lux"]],
+        ["Bq", 1, mk_dim({s: -1}), true, []],
+        ["Gy", 1, mk_dim({m: 2, s: -2}), true, []],
+        ["Sv", 1, mk_dim({m: 2, s: -2}), true, []],
+        ["ohm", 1, mk_dim({kg: 1, m: 2, s: -3, a: -2}), true, ["Ω", "ohms"]],
+        ["min", 60, mk_dim({s: 1}), false, ["minute", "minutes"]],
+        ["h", 3600, mk_dim({s: 1}), false, ["hr", "hrs", "hour", "hours"]],
+        ["day", 86400, mk_dim({s: 1}), false, ["days"]],
+        ["yr", 31557600, mk_dim({s: 1}), false, ["year", "years"]],
+        ["L", 1e-3, mk_dim({m: 3}), true, ["liter", "liters", "litre", "litres"]],
+        ["t", 1000, mk_dim({kg: 1}), true, ["tonne", "tonnes"]],
+        ["eV", 1.602176634e-19, mk_dim({kg: 1, m: 2, s: -2}), true, []],
+        ["cal", 4.184, mk_dim({kg: 1, m: 2, s: -2}), true, []],
+        ["bar", 1e5, mk_dim({kg: 1, m: -1, s: -2}), true, []],
+        ["atm", 101325, mk_dim({kg: 1, m: -1, s: -2}), false, []],
+        ["angstrom", 1e-10, mk_dim({m: 1}), false, ["Å"]],
+        ["au", 1.495978707e11, mk_dim({m: 1}), false, []],
+        ["ly", 9.4607304725808e15, mk_dim({m: 1}), false, []],
+        ["pc", 3.085677581491367e16, mk_dim({m: 1}), false, ["parsec", "parsecs"]],
+        ["in", 0.0254, mk_dim({m: 1}), false, ["inch", "inches"]],
+        ["ft", 0.3048, mk_dim({m: 1}), false, ["foot", "feet"]],
+        ["yd", 0.9144, mk_dim({m: 1}), false, ["yard", "yards"]],
+        ["mi", 1609.344, mk_dim({m: 1}), false, ["mile", "miles"]],
+        ["lb", 0.45359237, mk_dim({kg: 1}), false, ["lbs", "pound", "pounds"]],
+        ["oz", 0.028349523125, mk_dim({kg: 1}), false, ["ounce", "ounces"]],
+        ["psi", 6894.757293168, mk_dim({kg: 1, m: -1, s: -2}), false, []],
+        ["mph", 0.44704, mk_dim({m: 1, s: -1}), false, []],
+        ["knot", 0.5144444444444445, mk_dim({m: 1, s: -1}), false, ["knots"]],
+        ["gal", 3.785411784e-3, mk_dim({m: 3}), false, ["gallon", "gallons"]],
+        ["rad", 1, D0, true, ["radian", "radians"]],
+        ["deg", math.pi / 180, D0, false, ["°", "degree", "degrees"]],
+        ["sr", 1, D0, true, []],
+        ["pct", 0.01, D0, false, ["percent"]],
+        ["ppm", 1e-6, D0, false, []],
+        ["ppb", 1e-9, D0, false, []],
+        ["count", 1, D0, false, []],
+        ["bit", 1, D0, false, ["bits"]],
+        ["byte", 8, D0, false, ["bytes"]],
+    ]
+    for sp in specs:
+        let sym = sp[0]
+        let sc = sp[1]
+        let dim = sp[2]
+        let pf = sp[3]
+        let als = sp[4]
+        units[sym] = {sc: sc, dim: dim}
+        for a in als:
+            units[a] = {sc: sc, dim: dim}
+        if pf:
+            prefs = push(prefs, sym)
+    let sip = [
+        ["Q", 1e30], ["R", 1e27], ["Y", 1e24], ["Z", 1e21], ["E", 1e18], ["P", 1e15],
+        ["T", 1e12], ["G", 1e9], ["M", 1e6], ["k", 1e3], ["h", 1e2], ["da", 1e1],
+        ["d", 1e-1], ["c", 1e-2], ["m", 1e-3], ["u", 1e-6], ["µ", 1e-6], ["n", 1e-9],
+        ["p", 1e-12], ["f", 1e-15], ["a", 1e-18], ["z", 1e-21], ["y", 1e-24],
+        ["r", 1e-27], ["q", 1e-30],
+    ]
+    for pr in sip:
+        for s in prefs:
+            let k = pr[0] + s
+            if not (k in units):
+                let entry = units[s]
+                units[k] = {sc: entry.sc * pr[1], dim: entry.dim}
+    var dimnames = {}
+    let dn_syms = ["Hz", "N", "Pa", "J", "W", "C", "V", "F", "H", "S", "Wb", "T", "lm", "lx", "Bq", "Gy", "Sv", "ohm"] + BASE_NAMES
+    for s in dn_syms:
+        let entry = units[s]
+        let dk = dim_key(entry.dim)
+        if entry.sc == 1.0 and not (dk in dimnames) and not dimless(entry.dim):
+            dimnames[dk] = s
+    return {units: units, dimnames: dimnames}
+
+pin _TABLES = _build_unit_tables()
+pin UNITS = _TABLES.units
+pin DIMNAME = _TABLES.dimnames
+
+fn dimstr(d):
+    if dimless(d):
+        return ""
+    let dk = dim_key(d)
+    if dk in DIMNAME:
+        return DIMNAME[dk]
+    var pos_items = []
+    var neg_items = []
+    var k = 0
+    while k < 7:
+        let e = d[k]
+        if e[0] > 0:
+            if e[0] == 1 and e[1] == 1:
+                pos_items = push(pos_items, BASE_NAMES[k])
+            else:
+                pos_items = push(pos_items, BASE_NAMES[k] + "^" + fstr(e))
+        elif e[0] < 0:
+            let ne = fneg(e)
+            if ne[0] == 1 and ne[1] == 1:
+                neg_items = push(neg_items, BASE_NAMES[k])
+            else:
+                neg_items = push(neg_items, BASE_NAMES[k] + "^" + fstr(ne))
+        k += 1
+    var a = "1"
+    if len(pos_items) > 0:
+        a = join("*", pos_items)
+    if len(neg_items) == 0:
+        return a
+    let b = join("*", neg_items)
+    if len(neg_items) == 1:
+        return a + "/" + b
+    return a + "/(" + b + ")"
+
+fn _scan_exp_lit(chars, n, k):
+    if k >= n:
+        return nil
+    var p = k
+    var sign = 1
+    if chars[p] == "+":
+        p += 1
+    elif chars[p] == "-":
+        sign = -1
+        p += 1
+    if p >= n or not (chars[p] in u.DIGIT_SET):
+        return nil
+    var num_v = 0
+    while p < n and chars[p] in u.DIGIT_SET:
+        num_v = num_v * 10 + num(chars[p])
+        p += 1
+    var den_v = 1
+    if p < n and chars[p] == "/" and p + 1 < n and chars[p + 1] in u.DIGIT_SET:
+        p += 1
+        den_v = 0
+        while p < n and chars[p] in u.DIGIT_SET:
+            den_v = den_v * 10 + num(chars[p])
+            p += 1
+        if den_v == 0:
+            return nil
+    return {exp: frac(sign * num_v, den_v), end: p}
+
+fn _scan_exp(chars, n, k):
+    if k >= n:
+        return nil
+    if chars[k] == "(":
+        let inner = _scan_exp_lit(chars, n, k + 1)
+        if inner != nil and inner.end < n and chars[inner.end] == ")":
+            return {exp: inner.exp, end: inner.end + 1}
+        return nil
+    return _scan_exp_lit(chars, n, k)
+
+fn scan_unit_chars(src, chars, n, i):
+    return _scan_expr(src, chars, n, i)
+
+fn _scan_term(src, chars, n, j):
+    if j >= n:
+        return nil
+    let c = chars[j]
+    if c == "(":
+        let r = _scan_expr(src, chars, n, j + 1)
+        if r != nil and r.end < n and chars[r.end] == ")":
+            return {sc: r.sc, dim: r.dim, end: r.end + 1}
+        return nil
+    if c == "1":
+        if j + 1 >= n or not (chars[j + 1] in u.IDENT_SET or chars[j + 1] == "."):
+            return {sc: 1.0, dim: D0, end: j + 1}
+        return nil
+    if not (c in u.UNIT_START_SET):
+        return nil
+    var k = j + 1
+    while k < n and chars[k] in u.UNIT_CONT_SET:
+        k += 1
+    let sym = slice(src, j, k)
+    if not (sym in UNITS):
+        return nil
+    let info = UNITS[sym]
+    var sc = info.sc
+    var d = info.dim
+    if k < n and chars[k] == "^":
+        let er = _scan_exp(chars, n, k + 1)
+        if er != nil:
+            sc = sc ^ fval(er.exp)
+            d = dscale(d, er.exp)
+            k = er.end
+    return {sc: sc, dim: d, end: k}
+
+fn _scan_expr(src, chars, n, j):
+    let r = _scan_term(src, chars, n, j)
+    if r == nil:
+        return nil
+    var sc = r.sc
+    var d = r.dim
+    var k = r.end
+    while k < n and (chars[k] == "*" or chars[k] == "/" or chars[k] == "·"):
+        let op = chars[k]
+        let r2 = _scan_term(src, chars, n, k + 1)
+        if r2 == nil:
+            break
+        if op == "/":
+            sc = sc / r2.sc
+            d = dsub(d, r2.dim)
+        else:
+            sc = sc * r2.sc
+            d = dadd(d, r2.dim)
+        k = r2.end
+    return {sc: sc, dim: d, end: k}
+
+fn parse_unit(text, src_info = nil, site = nil):
+    let t = trim(text)
+    let chars = list(t)
+    let n = len(chars)
+    let r = scan_unit_chars(t, chars, n, 0)
+    if r == nil or r.end != n:
+        u.diag_err(src_info, site, "unknown or malformed unit '" + text + "'")
+    return {sc: r.sc, dim: r.dim}

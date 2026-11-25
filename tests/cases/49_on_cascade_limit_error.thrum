@@ -1,0 +1,3 @@
+var x = 0
+on x < 2000 always:
+    x = x + 1

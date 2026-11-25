@@ -1,0 +1,8 @@
+use "./lib.thrum" as lib
+var price = 100
+let total = price + lib.tax(price)
+
+with io:
+    io.say(total)
+    lib.rate = 0.20        # cross-module relation propagates
+    io.say(total)

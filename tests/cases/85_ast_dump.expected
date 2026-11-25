@@ -1,0 +1,23 @@
+decl
+  kw:
+    'let'
+  name:
+    'x'
+  value:
+    bin
+      op:
+        '+'
+      left:
+        q
+          value:
+            Q(1)
+      right:
+        q
+          value:
+            Q(2 m)
+  init:
+    None
+  src:
+    '1 + 2 m'
+  live:
+    True

@@ -1,0 +1,3 @@
+74_circular_use_error.thrum:1:1: error: circular module import './_helper_circ_a.thrum'
+      1 | use "./_helper_circ_a.thrum" as a
+        | ^

@@ -1,0 +1,2 @@
+fn ke(m: kg, v: m/s) -> J:
+    return m * v

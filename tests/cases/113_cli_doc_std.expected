@@ -1,0 +1,9 @@
+module path
+===========
+  basename           <builtin path.basename>
+  dirname            <builtin path.dirname>
+  ext                <builtin path.ext>
+  join               <builtin path.join>
+  normalize          <builtin path.normalize>
+  split              <builtin path.split>
+  stem               <builtin path.stem>

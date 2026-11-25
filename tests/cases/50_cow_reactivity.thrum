@@ -1,0 +1,10 @@
+var xs = [1, 2, 3]
+var cfg = {a: 10, b: 20}
+let total = sum(xs) + cfg.a + cfg.b
+with io:
+    io.say(total)
+    xs[0] = 5
+    xs[1] += 8
+    cfg.a = 15
+    cfg.b += 5
+    io.say(total)

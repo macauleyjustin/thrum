@@ -1,0 +1,14 @@
+use text
+with io:
+    io.say(text.title("hello thrum"))
+    io.say(text.ltrim("  hi"))
+    io.say(text.rtrim("hi  "))
+    io.say(text.contains("thrum", "ru"))
+    io.say(text.index_of("thrum", "ru"))
+    io.say(text.count("banana", "na"))
+    io.say(text.pad_left("7", 3, "0"))
+    io.say(text.pad_right("hi", 4, "."))
+    io.say(text.repeat("ab", 3))
+    io.say(text.chars("ok"))
+    io.say(text.words("a  b\tc"))
+    io.say(text.format(r"{0}={1}", "x", 5 m))

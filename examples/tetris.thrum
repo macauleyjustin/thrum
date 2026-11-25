@@ -1,0 +1,544 @@
+# TETRIS in Thrum
+#
+# Modes:
+#   Interactive TTY : python3 thrum.py run examples/tetris.thrum
+#   Demo AI autoplay: python3 thrum.py run examples/tetris.thrum -- --demo 40
+#   Plain ASCII demo: python3 thrum.py run examples/tetris.thrum -- --demo 25 --plain
+#   Turn-based stdin: python3 thrum.py run examples/tetris.thrum -- --turn
+#   Deterministic   : --journal game.json / --replay game.json
+
+use math
+
+pin COLS = 10
+pin ROWS = 20
+
+record Piece:
+    kind: text
+    rot: 1 = 0
+    x: 1 = 3
+    y: 1 = 0
+
+pin SHAPES = {
+    I: [
+        [[0, 1], [1, 1], [2, 1], [3, 1]],
+        [[2, 0], [2, 1], [2, 2], [2, 3]],
+        [[0, 2], [1, 2], [2, 2], [3, 2]],
+        [[1, 0], [1, 1], [1, 2], [1, 3]],
+    ],
+    O: [
+        [[1, 0], [2, 0], [1, 1], [2, 1]],
+        [[1, 0], [2, 0], [1, 1], [2, 1]],
+        [[1, 0], [2, 0], [1, 1], [2, 1]],
+        [[1, 0], [2, 0], [1, 1], [2, 1]],
+    ],
+    T: [
+        [[1, 0], [0, 1], [1, 1], [2, 1]],
+        [[1, 0], [1, 1], [2, 1], [1, 2]],
+        [[0, 1], [1, 1], [2, 1], [1, 2]],
+        [[1, 0], [0, 1], [1, 1], [1, 2]],
+    ],
+    S: [
+        [[1, 0], [2, 0], [0, 1], [1, 1]],
+        [[1, 0], [1, 1], [2, 1], [2, 2]],
+        [[1, 1], [2, 1], [0, 2], [1, 2]],
+        [[0, 0], [0, 1], [1, 1], [1, 2]],
+    ],
+    Z: [
+        [[0, 0], [1, 0], [1, 1], [2, 1]],
+        [[2, 0], [1, 1], [2, 1], [1, 2]],
+        [[0, 1], [1, 1], [1, 2], [2, 2]],
+        [[1, 0], [0, 1], [1, 1], [0, 2]],
+    ],
+    J: [
+        [[0, 0], [0, 1], [1, 1], [2, 1]],
+        [[1, 0], [2, 0], [1, 1], [1, 2]],
+        [[0, 1], [1, 1], [2, 1], [2, 2]],
+        [[1, 0], [1, 1], [0, 2], [1, 2]],
+    ],
+    L: [
+        [[2, 0], [0, 1], [1, 1], [2, 1]],
+        [[1, 0], [1, 1], [1, 2], [2, 2]],
+        [[0, 1], [1, 1], [2, 1], [0, 2]],
+        [[0, 0], [1, 0], [1, 1], [1, 2]],
+    ],
+}
+
+pin COLORS = {
+    I: "\x1b[96m",
+    O: "\x1b[93m",
+    T: "\x1b[95m",
+    S: "\x1b[92m",
+    Z: "\x1b[91m",
+    J: "\x1b[94m",
+    L: "\x1b[33m",
+}
+pin RESET = "\x1b[0m"
+pin DIM = "\x1b[90m"
+pin BOLD = "\x1b[1m"
+pin LINE_SCORES = [0, 100, 300, 500, 800]
+
+fn empty_row() -> list:
+    return ["" for _ in 0..<COLS]
+
+fn new_board() -> list:
+    return [empty_row() for _ in 0..<ROWS]
+
+fn piece_cells(p: Piece) -> list:
+    let offsets = SHAPES[p.kind][p.rot % 4]
+    return [[p.x + d[0], p.y + d[1]] for d in offsets]
+
+fn fits(board: list, p: Piece) -> bool:
+    for cell in piece_cells(p):
+        let cx = cell[0]
+        let cy = cell[1]
+        if cx < 0 or cx >= COLS or cy >= ROWS:
+            return false
+        if cy >= 0 and board[cy][cx] != "":
+            return false
+    return true
+
+fn try_move(board: list, p: Piece, dx: 1, dy: 1):
+    let moved = Piece{kind: p.kind, rot: p.rot, x: p.x + dx, y: p.y + dy}
+    if fits(board, moved):
+        return moved
+    return nil
+
+fn try_rotate(board: list, p: Piece, delta: 1):
+    let nr = (p.rot + delta + 4) % 4
+    for kx in [0, -1, 1, -2, 2]:
+        let cand = Piece{kind: p.kind, rot: nr, x: p.x + kx, y: p.y}
+        if fits(board, cand):
+            return cand
+    let up = Piece{kind: p.kind, rot: nr, x: p.x, y: p.y - 1}
+    if fits(board, up):
+        return up
+    return nil
+
+fn ghost_piece(board: list, p: Piece) -> Piece:
+    var gy = p.y
+    while true:
+        let next_p = Piece{kind: p.kind, rot: p.rot, x: p.x, y: gy + 1}
+        if not fits(board, next_p):
+            break
+        gy += 1
+    return Piece{kind: p.kind, rot: p.rot, x: p.x, y: gy}
+
+fn stamp_and_clear(board: list, p: Piece) -> map:
+    var b = [list(row) for row in board]
+    for cell in piece_cells(p):
+        let cx = cell[0]
+        let cy = cell[1]
+        if cy >= 0 and cy < ROWS and cx >= 0 and cx < COLS:
+            var row = b[cy]
+            row[cx] = p.kind
+            b[cy] = row
+    var kept = []
+    var cleared = 0
+    for row in b:
+        if all(row, \it != ""):
+            cleared += 1
+        else:
+            kept = push(kept, row)
+    while len(kept) < ROWS:
+        kept = [empty_row()] + kept
+    return {board: kept, cleared: cleared}
+
+fn eval_board(board: list, cleared: 1) -> num:
+    var heights = [0 for _ in 0..<COLS]
+    var holes = 0
+    for c in 0..<COLS:
+        var seen = false
+        for r in 0..<ROWS:
+            if board[r][c] != "":
+                if not seen:
+                    heights[c] = ROWS - r
+                    seen = true
+            elif seen:
+                holes += 1
+    var agg_h = 0
+    for h in heights:
+        agg_h += h
+    var bump = 0
+    for c in 0..<(COLS - 1):
+        bump += abs(heights[c] - heights[c + 1])
+    return cleared * 8.0 - agg_h * 0.51 - holes * 3.6 - bump * 0.18
+
+fn best_ai_piece(board: list, kind: text) -> Piece:
+    var best_score = -1e9
+    var best_p = Piece{kind: kind, rot: 0, x: 3, y: 0}
+    var nrots = 4
+    if kind == "O":
+        nrots = 1
+    elif kind == "I" or kind == "S" or kind == "Z":
+        nrots = 2
+    var col_tops = [ROWS for _ in 0..<COLS]
+    for c in 0..<COLS:
+        for r in 0..<ROWS:
+            if board[r][c] != "":
+                col_tops[c] = r
+                break
+    for r in 0..<nrots:
+        let offsets = SHAPES[kind][r]
+        for x in -2..<COLS:
+            # Fast horizontal bounds + jump landing y from col_tops
+            var ok = true
+            var min_y = ROWS
+            for d in offsets:
+                let cx = x + d[0]
+                if cx < 0 or cx >= COLS:
+                    ok = false
+                    break
+                let cand_y = col_tops[cx] - 1 - d[1]
+                if cand_y < min_y:
+                    min_y = cand_y
+            if ok and min_y >= 0:
+                var landed = Piece{kind: kind, rot: r, x: x, y: min_y}
+                if not fits(board, landed):
+                    while min_y >= 0 and not fits(board, Piece{kind: kind, rot: r, x: x, y: min_y}):
+                        min_y -= 1
+                    landed = Piece{kind: kind, rot: r, x: x, y: min_y}
+                if min_y >= 0 and fits(board, Piece{kind: kind, rot: r, x: x, y: 0}):
+                    let res = stamp_and_clear(board, landed)
+                    let sc = eval_board(res.board, res.cleared)
+                    if sc > best_score:
+                        best_score = sc
+                        best_p = landed
+    return best_p
+
+fn cell_glyph(kind: text, use_color: bool) -> text:
+    if kind == "":
+        return "  "
+    if kind == "::":
+        if use_color:
+            return DIM + "::" + RESET
+        return "::"
+    if use_color:
+        return COLORS[kind] + "[]" + RESET
+    return "[]"
+
+fn mini_preview(kind, row_idx: 1, use_color: bool) -> text:
+    if isnil(kind):
+        return "        "
+    let offsets = SHAPES[kind][0]
+    var out = ""
+    for c in 0..<4:
+        var hit = false
+        for d in offsets:
+            if d[0] == c and d[1] == row_idx:
+                hit = true
+        if hit:
+            out += cell_glyph(kind, use_color)
+        else:
+            out += "  "
+    return out
+
+fn pad_r(txt: text, w: 1) -> text:
+    var s = txt
+    while len(s) < w:
+        s += " "
+    return s
+
+fn render_frame(
+    board: list,
+    active: Piece,
+    ghost: Piece,
+    next_kind: text,
+    hold_kind,
+    score: 1,
+    lines: 1,
+    level: 1,
+    tick_dt: s,
+    elapsed: s,
+    status: text,
+    paused: bool,
+    game_over: bool,
+    use_color: bool,
+    home: bool
+) -> text:
+    var act_cells = {}
+    for c in piece_cells(active):
+        act_cells["{c[0]},{c[1]}"] = true
+    var ghost_cells = {}
+    for c in piece_cells(ghost):
+        ghost_cells["{c[0]},{c[1]}"] = true
+
+    var out = ""
+    if home:
+        out = "\x1b[H"
+    var hdr = "THRUM TETRIS"
+    if use_color:
+        hdr = BOLD + "THRUM TETRIS" + RESET
+    out += "  +" + ("--" * COLS) + "+   " + hdr + "\n"
+
+    for r in 0..<ROWS:
+        var line = "  |"
+        for c in 0..<COLS:
+            let key = "{c},{r}"
+            if key in act_cells:
+                line += cell_glyph(active.kind, use_color)
+            elif key in ghost_cells:
+                line += cell_glyph("::", use_color)
+            else:
+                line += cell_glyph(board[r][c], use_color)
+        line += "|   "
+
+        if r == 0:
+            line += "Score : {score}"
+        elif r == 1:
+            line += "Lines : {lines}"
+        elif r == 2:
+            line += "Level : {level}"
+        elif r == 3:
+            line += "Tick  : {fix(tick_dt, 2)} ({fix(1 / tick_dt, 1)})"
+        elif r == 4:
+            line += "Time  : {fix(elapsed, 1)}"
+        elif r == 6:
+            line += "Next:"
+        elif r == 7:
+            line += "  " + mini_preview(next_kind, 0, use_color)
+        elif r == 8:
+            line += "  " + mini_preview(next_kind, 1, use_color)
+        elif r == 10:
+            line += "Hold:"
+        elif r == 11:
+            line += "  " + mini_preview(hold_kind, 0, use_color)
+        elif r == 12:
+            line += "  " + mini_preview(hold_kind, 1, use_color)
+        elif r == 14:
+            line += "Controls:"
+        elif r == 15:
+            line += "  a/d or <-/-> : move"
+        elif r == 16:
+            line += "  w/z or up    : rotate"
+        elif r == 17:
+            line += "  s/down       : soft drop"
+        elif r == 18:
+            line += "  space / c    : drop / hold"
+        elif r == 19:
+            line += "  p / q        : pause / quit"
+
+        out += line + "\n"
+
+    out += "  +" + ("--" * COLS) + "+\n"
+    if game_over:
+        out += "  GAME OVER! " + status + "\n"
+    elif paused:
+        out += "  PAUSED — press 'p' to resume, 'q' to quit.\n"
+    else:
+        out += "  " + pad_r(status, 52) + "\n"
+    return out
+
+# ---------------- Main Game Loop ----------------
+var score = 0
+var lines = 0
+var pieces_locked = 0
+var combo = 0
+let level = 1 + floor(lines / 10)
+let tick_dt = max([0.08 s, 0.72 s - (level - 1) * 0.06 s])
+var status_msg = "7-bag live! Clear lines to speed up."
+
+on level > 1 always:
+    status_msg = "LEVEL {level}! Gravity interval now {fix(tick_dt, 2)}"
+
+with io, clock, rand, tty, args:
+    pin argv = args.all()
+    var demo_mode = false
+    var demo_steps = 40
+    var force_turn = false
+    var force_plain = false
+
+    for i in 0..<len(argv):
+        let arg = argv[i]
+        if arg == "--demo":
+            demo_mode = true
+            if i + 1 < len(argv):
+                try:
+                    demo_steps = num(argv[i + 1])
+                catch _e:
+                    demo_steps = 40
+        elif arg == "--turn":
+            force_turn = true
+        elif arg == "--plain":
+            force_plain = true
+
+    let is_live_tty = tty.is_tty() and not demo_mode and not force_turn
+    let use_color = is_live_tty and not force_plain
+    var bag = rand.shuffle(["I", "O", "T", "S", "Z", "J", "L"])
+
+    fn pop_bag() -> text:
+        if len(bag) == 0:
+            bag = rand.shuffle(["I", "O", "T", "S", "Z", "J", "L"])
+        let k = bag[0]
+        bag = bag[1:]
+        return k
+
+    var board = new_board()
+    var active = Piece{kind: pop_bag(), rot: 0, x: 3, y: 0}
+    var next_kind = pop_bag()
+    var hold_kind = nil
+    var can_hold = true
+    var paused = false
+    var game_over = false
+    var quit_now = false
+
+    let start_t = clock.mono()
+    var last_drop = start_t
+
+    fn spawn_next():
+        active = Piece{kind: next_kind, rot: 0, x: 3, y: 0}
+        next_kind = pop_bag()
+        can_hold = true
+        if not fits(board, active):
+            game_over = true
+            status_msg = "Final score: {score} ({lines} lines, level {level})"
+
+    fn lock_active():
+        let res = stamp_and_clear(board, active)
+        board = res.board
+        let clr = res.cleared
+        pieces_locked += 1
+        if clr > 0:
+            combo += 1
+            let pts = LINE_SCORES[clr] * level + (combo - 1) * 50 * level
+            score += pts
+            lines += clr
+            if clr == 4:
+                status_msg = "TETRIS! +{pts} pts"
+            else:
+                status_msg = "Cleared {clr} line(s)! +{pts} pts"
+        else:
+            combo = 0
+        spawn_next()
+
+    fn do_hold():
+        if not can_hold:
+            status_msg = "Hold already used for this piece."
+            return
+        can_hold = false
+        if isnil(hold_kind):
+            hold_kind = active.kind
+            spawn_next()
+        else:
+            let tmp = hold_kind
+            hold_kind = active.kind
+            active = Piece{kind: tmp, rot: 0, x: 3, y: 0}
+            if not fits(board, active):
+                game_over = true
+
+    fn handle_cmd(cmd: text):
+        if cmd == "q" or cmd == "esc":
+            quit_now = true
+            return
+        if cmd == "p":
+            paused = not paused
+            return
+        if paused or game_over:
+            return
+        if cmd == "a" or cmd == "left":
+            let m = try_move(board, active, -1, 0)
+            if not isnil(m): active = m
+        elif cmd == "d" or cmd == "right":
+            let m = try_move(board, active, 1, 0)
+            if not isnil(m): active = m
+        elif cmd == "w" or cmd == "x" or cmd == "up":
+            let r = try_rotate(board, active, 1)
+            if not isnil(r): active = r
+        elif cmd == "z":
+            let r = try_rotate(board, active, -1)
+            if not isnil(r): active = r
+        elif cmd == "s" or cmd == "down":
+            let m = try_move(board, active, 0, 1)
+            if not isnil(m):
+                active = m
+                score += 1
+            else:
+                lock_active()
+        elif cmd == "space" or cmd == "drop" or cmd == " ":
+            let g = ghost_piece(board, active)
+            score += (g.y - active.y) * 2
+            active = g
+            lock_active()
+        elif cmd == "c":
+            do_hold()
+        elif cmd == "." or cmd == "tick":
+            let m = try_move(board, active, 0, 1)
+            if not isnil(m):
+                active = m
+            else:
+                lock_active()
+
+    if is_live_tty:
+        tty.enter_raw()
+        tty.hide_cursor()
+        tty.clear()
+        while not quit_now and not game_over:
+            let now = clock.mono()
+            if not paused and (now - last_drop) >= tick_dt:
+                last_drop = now
+                let fallen = try_move(board, active, 0, 1)
+                if not isnil(fallen):
+                    active = fallen
+                else:
+                    lock_active()
+            if game_over:
+                break
+            let g = ghost_piece(board, active)
+            let frame = render_frame(
+                board, active, g, next_kind, hold_kind,
+                score, lines, level, tick_dt, now - start_t,
+                status_msg, paused, game_over, use_color, true
+            )
+            tty.write(frame)
+            let k = tty.poll_key(0.03 s)
+            if not isnil(k):
+                handle_cmd(lower(k))
+                if not paused and (lower(k) == "s" or lower(k) == "down"):
+                    last_drop = clock.mono()
+        let g = ghost_piece(board, active)
+        tty.write(render_frame(
+            board, active, g, next_kind, hold_kind,
+            score, lines, level, tick_dt, clock.mono() - start_t,
+            status_msg, paused, game_over, use_color, true
+        ))
+        tty.show_cursor()
+        tty.exit_raw()
+    elif demo_mode:
+        var step = 0
+        while step < demo_steps and not game_over:
+            let target = best_ai_piece(board, active.kind)
+            score += (target.y - active.y) * 2
+            active = target
+            lock_active()
+            step += 1
+        let g = ghost_piece(board, active)
+        io.print(render_frame(
+            board, active, g, next_kind, hold_kind,
+            score, lines, level, tick_dt, clock.mono() - start_t,
+            "Demo ({step} pieces): " + status_msg, false, game_over, use_color, false
+        ))
+    else:
+        while not quit_now and not game_over:
+            let g = ghost_piece(board, active)
+            io.print(render_frame(
+                board, active, g, next_kind, hold_kind,
+                score, lines, level, tick_dt, clock.mono() - start_t,
+                status_msg, paused, game_over, use_color, false
+            ))
+            var cmd = ""
+            try:
+                cmd = lower(trim(io.ask("move [a/d/w/s/space/c/./q]> ")))
+            catch _e:
+                quit_now = true
+                io.say("")
+            if quit_now:
+                break
+            if cmd == "":
+                cmd = "space"
+            handle_cmd(cmd)
+        if game_over:
+            let g = ghost_piece(board, active)
+            io.print(render_frame(
+                board, active, g, next_kind, hold_kind,
+                score, lines, level, tick_dt, clock.mono() - start_t,
+                status_msg, paused, true, use_color, false
+            ))

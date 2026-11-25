@@ -1,0 +1,13 @@
+use stat
+use math
+with io:
+    io.say(stat.weighted_mean([10.0 ± 0.1 m, 12.0 ± 0.3 m]))
+    io.say(stat.quantile([10, 20, 30, 40], 0.5))
+    io.say(stat.iqr([10, 20, 30, 40]))
+    io.say(round(stat.corr([1, 2, 3], [2, 4, 6]), 6))
+    io.say(stat.mode([1, 2, 2, 3]))
+    io.say(math.linspace(0 m, 10 m, 3))
+    io.say(math.dot([1 m, 2 m], [3 N, 4 N]))
+    io.say(math.norm([3 m, 4 m]))
+    io.say("{math.is_prime(17)} {math.comb(5, 2)} {math.lcm(6, 8)}")
+    io.say(round(math.deg2rad(180), 6))

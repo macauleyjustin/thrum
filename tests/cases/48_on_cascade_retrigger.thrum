@@ -1,0 +1,7 @@
+var x = 0
+with io:
+    on x < 3 always:
+        io.say("step {x}")
+        x = x + 1
+    x = 1
+    io.say("final {x}")

@@ -1,0 +1,3 @@
+23_dim_convert_error.thrum:1:9: error: cannot convert m to kg
+      1 | let x = 5 m as kg
+        |         ^

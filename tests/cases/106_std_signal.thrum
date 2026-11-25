@@ -1,0 +1,9 @@
+use std.signal
+var state = {}
+let s1 = signal.pid_step(state, 10 K, 8 K, 1 s, {kp: 2, ki: 0.5 1/s, kd: 0 s})
+with io:
+    io.say(signal.clamp01(1.5))
+    io.say(signal.deadband(0.2 m, 0.5 m))
+    io.say(signal.ema(10 m, 20 m, 0.25))
+    io.say(s1.out)
+    io.say(signal.rmse([1 m, 2 m], [1 m, 4 m]))

@@ -1,0 +1,3 @@
+with io:
+    io.say(c2k(25))
+    io.say(k2c(273.15 K))

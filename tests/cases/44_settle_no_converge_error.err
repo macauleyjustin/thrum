@@ -1,0 +1,4 @@
+44_settle_no_converge_error.thrum:1:1: error: settle did not converge in 5 iterations
+      1 | settle max 5 tol 1e-12:
+        | ^
+  hint: increase 'max', loosen 'tol', or check that the relations are contractive

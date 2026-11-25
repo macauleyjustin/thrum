@@ -1,0 +1,7 @@
+use test
+test.run("eq", fn(): test.eq(2 + 2, 4))
+test.run("approx", fn(): test.approx(10.0 ± 0.1 m, 10.1 m))
+test.run("fails", fn(): test.fails(fn(): return 1 m + 1 s, "dimension mismatch"))
+let s = test.summary()
+with io:
+    io.say("{s.passed}/{s.total} failed={s.failed}")

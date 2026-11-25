@@ -1,0 +1,9 @@
+var n = 2
+settle max 20:
+    let r = (r + n / r) / 2 init 1
+fn outer(x):
+    return helper(x)
+fn helper(y):
+    return y + r
+with io:
+    io.say(outer(3))

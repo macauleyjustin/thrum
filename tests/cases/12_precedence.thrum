@@ -1,0 +1,7 @@
+with io:
+    io.say(-2^2)
+    io.say(2^3^2)
+    io.say(nil ?? 0 == 0)
+    io.say(not true and false)
+    io.say(not false or false)
+    io.say(1 + 2 * 3)

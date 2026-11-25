@@ -1,0 +1,4 @@
+fn bad(x: num) -> num:
+    ensures result > 0
+    return -x
+let y = bad(5)

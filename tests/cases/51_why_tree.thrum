@@ -1,0 +1,7 @@
+var a = 2 m
+var b = 3 s
+let v = a / b
+pin s = 5
+with io:
+    why v
+    why s

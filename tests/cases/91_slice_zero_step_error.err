@@ -1,0 +1,3 @@
+91_slice_zero_step_error.thrum:2:9: error: slice step cannot be 0
+      2 | let y = xs[::0]
+        |         ^

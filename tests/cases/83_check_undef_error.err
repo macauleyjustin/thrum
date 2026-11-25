@@ -1,0 +1,3 @@
+83_check_undef_error.thrum:2:12: error: undefined name 'missing_var'
+      2 |     return missing_var + 1
+        |            ^

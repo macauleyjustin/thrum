@@ -1,0 +1,17 @@
+fn desc(v):
+    match v:
+        case -1: return "neg1"
+        case 5 m: return "five_m"
+        case "a\nb": return "escaped"
+        case {kind: "pt", x, y} if x == y: return "diag"
+        case {kind: "pt", x, y}: return "{x},{y}"
+        case [h, *t]: return "head={h} rest={t}"
+        case _: return "other"
+with io:
+    io.say(desc(-1))
+    io.say(desc(500 cm))
+    io.say(desc(5 s))
+    io.say(desc("a\nb"))
+    io.say(desc({kind: "pt", x: 3, y: 3}))
+    io.say(desc({kind: "pt", x: 1, y: 2}))
+    io.say(desc([10, 20, 30]))

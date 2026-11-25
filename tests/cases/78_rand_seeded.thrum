@@ -1,0 +1,4 @@
+with io, rand(7):
+    io.say(round(rand.float(), 6))
+    io.say(rand.int(1, 10))
+    io.say(rand.pick(["a", "b", "c"]))
