@@ -1,5 +1,6 @@
 # Project-level *_test.thrum verification suite for Thrum stdlib & language.
 use test
+use math
 use std.vec
 use std.physics
 use std.signal
@@ -12,6 +13,11 @@ use regex
 use time
 use list
 use map
+use std.algo
+use std.num
+use std.geom
+use std.prob
+use std.complex
 
 fn t_vec2():
     let a = vec.vec2(3 m, 4 m)
@@ -48,6 +54,48 @@ fn t_list_map():
     test.eq(list.chunk([1, 2, 3, 4], 2), [[1, 2], [3, 4]])
     test.eq(map.pick({a: 1, b: 2}, ["b"]), {b: 2})
 
+fn t_algo():
+    let sorted = algo.msort([5, 1, 4, 2, 3])
+    test.eq(sorted, [1, 2, 3, 4, 5])
+    test.eq(algo.bsearch(sorted, 4), 3)
+    test.eq(algo.bsearch(sorted, 9), nil)
+    test.eq(algo.topo_sort({a: ["b", "c"], b: ["d"], c: ["d"], d: []}), ["a", "b", "c", "d"])
+    let sp = algo.dijkstra({a: [["b", 2], ["c", 5]], b: [["c", 1]], c: []}, "a")
+    test.eq(sp.dist.c, 3)
+
+fn t_num():
+    let root = num.bisect(fn(x: m) -> m^2: return x * x - 9 m^2, 0 m, 5 m, 1e-8 m)
+    test.ok(abs(root - 3 m) < 1e-6 m)
+    let integral = num.simpson(fn(x: m) -> m: return x, 0 m, 4 m, 20)
+    test.approx(integral, 8 m^2)
+    let traj = num.solve_ode(fn(t: s, y: m) -> m/s: return y / 2 s, 0 s, 1 m, 0.1 s, 20)
+    let end_y = traj[len(traj) - 1][1]
+    test.ok(abs(end_y - math.exp(1) * 1 m) < 1e-4 m)
+
+fn t_geom():
+    let sq = [geom.Pt2(0 m, 0 m), geom.Pt2(4 m, 0 m), geom.Pt2(4 m, 3 m), geom.Pt2(0 m, 3 m)]
+    test.eq(geom.poly_area(sq), 12 m^2)
+    test.eq(geom.poly_centroid(sq), geom.Pt2(2 m, 1.5 m))
+    test.ok(geom.point_in_poly(geom.Pt2(1 m, 1 m), sq))
+    test.ok(not geom.point_in_poly(geom.Pt2(5 m, 1 m), sq))
+    let pts = push(sq, geom.Pt2(2 m, 1.5 m))
+    test.eq(len(geom.convex_hull(pts)), 4)
+
+fn t_prob():
+    test.approx(prob.normal_cdf(0, 0, 1), 0.5)
+    test.ok(abs(prob.normal_cdf(1.95996398454, 0, 1) - 0.975) < 1e-5)
+    test.ok(abs(prob.normal_inv_cdf(0.975) - 1.95996398) < 1e-5)
+    test.approx(prob.shannon_entropy([0.5, 0.5]), 1)
+
+fn t_complex_fft():
+    let a = complex.Complex(3, 4)
+    test.eq(complex.cmag(a), 5)
+    let sig = [complex.Complex(1, 0), complex.Complex(2, 0), complex.Complex(3, 0), complex.Complex(4, 0)]
+    let rec = complex.ifft(complex.fft(sig))
+    for i in 0..<4:
+        test.ok(abs(rec[i].re - sig[i].re) < 1e-9)
+        test.ok(abs(rec[i].im - sig[i].im) < 1e-9)
+
 test.run("vec2 math", t_vec2)
 test.run("physics dimensions", t_physics)
 test.run("signal metrics", t_signal)
@@ -56,6 +104,11 @@ test.run("matrix solve2", t_matrix)
 test.run("json + csv roundtrip", t_json_csv)
 test.run("text + regex + time", t_text_regex_time)
 test.run("list + map", t_list_map)
+test.run("std.algo search, sort, heap, graph", t_algo)
+test.run("std.num root, integral, ode", t_num)
+test.run("std.geom polygon & hull", t_geom)
+test.run("std.prob normal & entropy", t_prob)
+test.run("std.complex & radix-2 fft", t_complex_fft)
 
 let res = test.summary()
-assert res.total == 8 and res.failed == 0, "stdlib tests had failures"
+assert res.total == 13 and res.failed == 0, "stdlib tests had failures"

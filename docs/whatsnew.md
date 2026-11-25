@@ -10,11 +10,11 @@ This document explains the major additions in **Thrum 0.2** compared to the init
 
 Thrum 0.2 transforms Thrum from an interpreted research language into a **self-hosted, natively compiled language** capable of producing standalone command-line tools, interactive terminal apps, and native macOS GUI software:
 
-1. **Self-Hosted Compiler (`thrumc`):** Complete compiler written in pure Thrum under [`selfhost/`](../selfhost/thrumc.thrum), generating portable C11 and verified to a byte-identical 3-stage fixed point.
-2. **Zero-Dependency C11 Native Runtime (`runtime/`):** Full mark-sweep garbage collector, topological reactive DAG solver, SI dimensional & Gaussian uncertainty arithmetic, UTF-8 text engine, MT19937 deterministic PRNG, replay journaling, and native Cocoa/Foundation backends.
-3. **Native macOS Desktop GUI (`gui`) & Explicit HTTPS (`net`):** Explicit `with gui:` Cocoa/AppKit 2D canvas (shapes, clipping, font metrics, scroll wheel, clipboard) and `with net:` HTTPS client (`NSURLSession`), showcased by a full desktop web browser (`examples/browser.thrum` / `ThrumBrowser.app`) and Klondike Solitaire (`examples/solitaire.thrum` / `ThrumSolitaire.app`).
-4. **Records, Pattern Matching & Contracts:** Immutable product `record`s with dimensional field verification, copy-on-write field mutation, `match` destructuring, and `requires`/`ensures` function contracts.
-5. **18 Standard Modules:** 13 built-in modules (`math`, `const`, `stat`, `units`, `text`, `regex`, `json`, `csv`, `time`, `path`, `list`, `map`, `test`) plus 5 pure-Thrum modules under [`stdlib/`](../stdlib/physics.thrum) (`std.vec`, `std.physics`, `std.signal`, `std.finance`, `std.matrix`).
+1. **Self-Hosted Compiler (`thrumc`):** Complete compiler written in pure Thrum under [`selfhost/`](../selfhost/thrumc.thrum), generating portable C11 and verified to a byte-identical 3-stage fixed point with full native CLI parity (`build`, `run`, `emit-c`, `check`, `ast`, `graph`, `fmt`, `doc`, `units`, `test`, `repl`, `version`).
+2. **Zero-Dependency C11 Native Runtime (`runtime/`):** Full mark-sweep garbage collector, O(1) hash-table string interning, topological reactive DAG solver (`thrum_export_graph`), SI dimensional & Gaussian uncertainty arithmetic, UTF-8 text engine, MT19937 deterministic PRNG, replay journaling, and native macOS Cocoa/Foundation backends.
+3. **Native macOS Desktop GUI (`gui`) & Explicit HTTPS (`net`):** Explicit `with gui:` Cocoa/AppKit 2D canvas (shapes, clipping, font metrics, scroll wheel, clipboard) and `with net:` HTTPS client (`NSURLSession`), cleanly sandboxed behind `with` capability blocks while CLI programs link only lightweight stubs.
+4. **Records, Parameterized Containers, Unions & Contracts:** Immutable product `record`s, `list[T]` and `map[K, V]` structural containers, `T | U` unions / `T?` optionals, Copy-on-Write updates, `match` destructuring, and `requires`/`ensures` contracts.
+5. **23 Standard Modules:** 13 built-in modules (`math`, `const`, `stat`, `units`, `text`, `regex`, `json`, `csv`, `time`, `path`, `list`, `map`, `test`) plus 10 pure-Thrum modules under [`stdlib/`](../stdlib/physics.thrum) (`std.vec`, `std.physics`, `std.signal`, `std.finance`, `std.matrix`, `std.algo`, `std.num`, `std.geom`, `std.prob`, `std.complex`).
 
 ---
 

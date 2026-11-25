@@ -3,10 +3,6 @@ runtime/build/
 runtime/libthrumrt.a
 /thrumc
 /tetris
-/solitaire
-/browser
-/ThrumSolitaire.app/
-/ThrumBrowser.app/
 *.thrumc.c
 .thrumc_run_*
 

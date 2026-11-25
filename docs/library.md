@@ -59,7 +59,7 @@ Installed unconditionally in every Thrum scope:
 - **Trig & Hyperbolic (dimensionless):** `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2(y, x)`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`, `deg2rad(d)`, `rad2deg(r)`.
 - **Exp & Log:** `exp`, `expm1`, `ln`, `log1p`, `log10`, `log2`, `log(x, base)`, `hypot(a, b)` (dimension-safe!).
 - **Classification:** `isfinite(x)`, `isnan(x)`, `isinf(x)`.
-- **Discrete & Vector:** `gcd(a, b)`, `lcm(a, b)`, `factorial(n)`, `comb(n, k)`, `perm(n, k)`, `is_prime(n)`, `factors(n)`, `linspace(a, b, n)`, `arange(start, stop[, step])`, `dot(a, b)`, `norm(xs)`, `cumsum(xs)`, `diff(xs)`, `clamp(x, lo, hi)`.
+- **Discrete, Bitwise & Vector:** `gcd(a, b)`, `lcm(a, b)`, `factorial(n)`, `comb(n, k)`, `perm(n, k)`, `is_prime(n)`, `factors(n)`, `band(a, b)`, `bor(a, b)`, `bxor(a, b)`, `bnot(a)`, `shl(a, k)`, `shr(a, k)`, `linspace(a, b, n)`, `arange(start, stop[, step])`, `dot(a, b)`, `norm(xs)`, `cumsum(xs)`, `diff(xs)`, `clamp(x, lo, hi)`.
 
 ### `const` (CODATA Physical & Astronomical Constants)
 
@@ -76,7 +76,7 @@ Exact and uncertain physical constants carrying full SI units and $\sigma$:
 
 ### `text`
 
-`split`, `join`, `upper`, `lower`, `title(s)`, `trim`, `ltrim(s)`, `rtrim(s)`, `replace`, `starts`, `ends`, `contains(s, sub)`, `index_of(s, sub)` (`-1` if missing), `count(s, sub)`, `pad_left(s, w[, ch=" "])`, `pad_right(s, w[, ch=" "])`, `repeat(s, n)`, `chars(s)`, `lines(s)`, `words(s)`, `is_digit(s)`, `is_alpha(s)`, `format(tmpl, args...)` (`{0}`, `{1}` or `{}`).
+`split`, `join`, `upper`, `lower`, `title(s)`, `trim`, `ltrim(s)`, `rtrim(s)`, `replace`, `starts`, `ends`, `contains(s, sub)`, `index_of(s, sub)` (`-1` if missing), `count(s, sub)`, `pad_left(s, w[, ch=" "])`, `pad_right(s, w[, ch=" "])`, `repeat(s, n)`, `chars(s)`, `lines(s)`, `words(s)`, `is_digit(s)`, `is_alpha(s)`, `ord(ch)`, `chr(cp)`, `to_hex(n)`, `to_bin(n)`, `from_hex(s)`, `format(tmpl, args...)` (`{0}`, `{1}` or `{}`).
 
 ### `regex`
 
@@ -117,6 +117,11 @@ POSIX Extended Regular Expressions (`\d`, `\w`, `\s` supported cleanly):
 - **`std.signal`:** `clamp01(x)`, `deadband(x, w)`, `ema(prev, x, alpha)`, `sma(xs)`, `lowpass(prev, target, dt, tau)`, `pid_step(state, sp, meas, dt, gains)`, `rmse(pred, actual)`, `mae(pred, actual)`.
 - **`std.finance`:** `compound(p, r, n)`, `continuous(p, r, t)`, `npv(r, cfs)`, `pmt(p, r, n)`, `cagr(v0, v1, n)`, `sharpe(rets[, rf=0])`.
 - **`std.matrix`:** `zeros(r, c)`, `eye(n)`, `shape(m)`, `transpose(m)`, `add(a, b)`, `scale(m, s)`, `matmul(a, b)`, `matvec(m, v)`, `trace(m)`, `det2(m)`, `solve2(m, b)`.
+- **`std.algo`:** `bsearch(xs, target)`, `lower_bound(xs, target)`, `upper_bound(xs, target)`, `merge_sorted(a, b[, less])`, `msort(xs)`, `msort_by(xs, less)`, `freq(xs)`, `set_union(a, b)`, `set_inter(a, b)`, `set_diff(a, b)`, `heap_new()`, `heap_push(h, prio, val)`, `heap_pop(h)`, `bfs(adj, start)`, `dfs(adj, start)`, `topo_sort(adj)`, `dijkstra(adj, start)`.
+- **`std.num`:** Dimension-preserving numerical solvers: `bisect(f, a, b, tol)`, `secant(f, x0, x1, tol)`, `newton(f, df, x0, tol)`, `deriv(f, x, h)`, `trapz(f, a, b, n)`, `simpson(f, a, b, n)`, `rk4_step(f, t, y, dt)`, `solve_ode(f, t0, y0, dt, steps)`, `polyval(coeffs, x)`.
+- **`std.geom`:** `record Pt2 {x: m, y: m}`, `record Rect`, `record Circle`, `dist(a, b)`, `dist_sq(a, b)`, `cross2(a, b, c)`, `rect_area`, `rect_intersects`, `circle_area`, `circle_contains`, `poly_area(pts)`, `poly_centroid(pts)`, `point_in_poly(p, pts)`, `convex_hull(pts)`.
+- **`std.prob`:** `erf(x)`, `normal_pdf(x, mu, sig)`, `normal_cdf(x, mu, sig)`, `normal_inv_cdf(p)`, `binomial_pmf(k, n, p)`, `poisson_pmf(k, lam)`, `confidence_interval(xs[, z])`, `shannon_entropy(probs)`.
+- **`std.complex`:** `record Complex {re, im}`, `make`, `polar`, `cadd`, `csub`, `cmul`, `cdiv`, `conj`, `cmag`, `carg`, `cexp`, radix-2 Cooley-Tukey `fft(xs)` and `ifft(xs)`.
 
 ---
 
@@ -124,7 +129,7 @@ POSIX Extended Regular Expressions (`\d`, `\w`, `\s` supported cleanly):
 
 | Capability | Methods | Purpose & Sandboxing |
 | :--- | :--- | :--- |
-| `io` | `say(...)`, `print(...)`, `ask([prompt])`, `warn(...)`, `err(...)`, `table(rows[, headers])` | Standard output/error streams and tabular display |
+| `io` | `say(...)`, `print(...)`, `ask([prompt])`, `eof()`, `warn(...)`, `err(...)`, `table(rows[, headers])` | Standard output/error streams, EOF check, and tabular display |
 | `clock` | `now() -> s`, `mono() -> s`, `sleep(dur: s)` | Wall/monotonic clocks and sleeping (journaled) |
 | `rand([seed])` | `float()`, `int(lo, hi)`, `pick(xs)`, `shuffle(xs)`, `sample(xs, k)`, `gauss(mu, sig)` | Deterministic MT19937 PRNG |
 | `fs([root])` | `read`, `read_lines`, `write`, `write_lines`, `append`, `exists`, `is_file`, `is_dir`, `list([p])`, `mkdir`, `remove` | Strictly jailed inside `root` (defaults to `.`; path traversal errors) |

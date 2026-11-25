@@ -1,0 +1,114 @@
+# Dimension-safe numerical root finding, quadrature, differentiation, ODEs, and polynomials.
+
+# Bisection root finder on bracket [a, b] where f(a) and f(b) have opposite signs; preserves unit of x.
+fn bisect(f: fn, a: num, b: num, tol: num, max_iter: 1 = 80) -> num:
+    requires max_iter >= 1, "max_iter must be positive"
+    var lo = a
+    var hi = b
+    var flo = f(lo)
+    let fhi = f(hi)
+    if bare(flo) == 0:
+        return lo
+    if bare(fhi) == 0:
+        return hi
+    if (bare(flo) > 0 and bare(fhi) > 0) or (bare(flo) < 0 and bare(fhi) < 0):
+        fail "bisect requires opposite-sign bracket endpoints"
+    var i = 0
+    while i < max_iter and abs(hi - lo) > tol:
+        let mid = (lo + hi) / 2
+        let fm = f(mid)
+        if bare(fm) == 0:
+            return mid
+        if (bare(flo) < 0 and bare(fm) < 0) or (bare(flo) > 0 and bare(fm) > 0):
+            lo = mid
+            flo = fm
+        else:
+            hi = mid
+        i += 1
+    return (lo + hi) / 2
+
+# Secant root finder starting from x0 and x1; preserves unit of x.
+fn secant(f: fn, x0: num, x1: num, tol: num, max_iter: 1 = 60) -> num:
+    var a = x0
+    var b = x1
+    var fa = f(a)
+    var fb = f(b)
+    for _ in 0..<max_iter:
+        if bare(abs(fb - fa)) == 0:
+            return b
+        let nx = b - fb * (b - a) / (fb - fa)
+        if abs(nx - b) <= tol:
+            return nx
+        a = b
+        fa = fb
+        b = nx
+        fb = f(b)
+    return b
+
+# Newton-Raphson root finder using analytic derivative df; preserves unit of x.
+fn newton(f: fn, df: fn, x0: num, tol: num, max_iter: 1 = 50) -> num:
+    var x = x0
+    for _ in 0..<max_iter:
+        let fx = f(x)
+        let dfx = df(x)
+        if bare(dfx) == 0:
+            fail "newton encountered zero derivative"
+        let nx = x - fx / dfx
+        if abs(nx - x) <= tol:
+            return nx
+        x = nx
+    return x
+
+# Central finite-difference derivative df/dx with step h; preserves unit y/x.
+fn deriv(f: fn, x: num, h: num) -> num:
+    requires bare(h) > 0, "step size must be positive"
+    return (f(x + h) - f(x - h)) / (2 * h)
+
+# Composite trapezoidal integral over [a, b] with n subintervals; preserves unit f(x)*x.
+fn trapz(f: fn, a: num, b: num, n: 1 = 100) -> num:
+    requires n >= 1, "subinterval count must be >= 1"
+    let h = (b - a) / n
+    var acc = (f(a) + f(b)) * 0.5
+    for i in 1..<n:
+        acc += f(a + i * h)
+    return acc * h
+
+# Composite Simpson's 1/3 rule over [a, b] (even subintervals); preserves unit f(x)*x.
+fn simpson(f: fn, a: num, b: num, n: 1 = 100) -> num:
+    requires n >= 2 and n % 2 == 0, "simpson requires even n >= 2"
+    let h = (b - a) / n
+    var acc = f(a) + f(b)
+    for i in 1..<n:
+        var w = 2
+        if i % 2 == 1:
+            w = 4
+        acc += w * f(a + i * h)
+    return acc * h / 3
+
+# Single 4th-order Runge-Kutta step for y' = f(t, y); preserves arbitrary t and y dimensions.
+fn rk4_step(f: fn, t: num, y: num, dt: num) -> num:
+    let k1 = f(t, y)
+    let k2 = f(t + dt * 0.5, y + k1 * (dt * 0.5))
+    let k3 = f(t + dt * 0.5, y + k2 * (dt * 0.5))
+    let k4 = f(t + dt, y + k3 * dt)
+    return y + (k1 + 2 * k2 + 2 * k3 + k4) * (dt / 6)
+
+# Solve scalar ODE y' = f(t, y) from t0 over steps steps of width dt; returns [[t, y], ...].
+fn solve_ode(f: fn, t0: num, y0: num, dt: num, steps: 1) -> list:
+    requires steps >= 0, "steps must be >= 0"
+    var t = t0
+    var y = y0
+    var traj = [[t, y]]
+    for _ in 0..<steps:
+        y = rk4_step(f, t, y, dt)
+        t += dt
+        traj = push(traj, [t, y])
+    return traj
+
+# Evaluate polynomial c[0]*x^(n-1) + ... + c[n-1] via Horner's scheme (dimensionless or matching coeffs).
+fn polyval(coeffs: list, x: num) -> num:
+    requires len(coeffs) >= 1, "polyval needs non-empty coefficients"
+    var acc = coeffs[0]
+    for i in 1..<len(coeffs):
+        acc = acc * x + coeffs[i]
+    return acc

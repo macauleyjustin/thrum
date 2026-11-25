@@ -29,8 +29,6 @@ Welcome! This is the official documentation for **Thrum 0.2.0**.
 
 ## Showcase Programs
 
-- **[Native Desktop Web Browser (`examples/browser.thrum`)](../examples/browser.thrum)** — Modular pure-Thrum multi-tab GUI web browser (`examples/browser/*.thrum`) featuring explicit `with net, gui, fs, clock:` HTTPS fetching, URL resolver, HTML5-style tokenizer/entity decoder, proportional table/flow layout, clickable links, history, bookmarks, light/dark themes, and HTML source inspector.
-- **[Klondike Solitaire (`examples/solitaire.thrum`)](../examples/solitaire.thrum)** — Native macOS desktop GUI card game using `with gui, clock, rand, args, io:`.
 - **[Tetris (`examples/tetris.thrum`)](../examples/tetris.thrum)** — Live reactive ANSI terminal game with AI demo mode and raw TTY input.
 - **[N-Body Simulation (`examples/nbody_sim.thrum`)](../examples/nbody_sim.thrum)** — Dimension-checked gravitational integration using `std.vec` and `std.physics`.
 - **[Lab Data Pipeline (`examples/lab_pipeline.thrum`)](../examples/lab_pipeline.thrum)** — Experimental uncertainty propagation, regression (`stat.linfit`), and error budgets.

@@ -1,0 +1,3 @@
+121_compound_type_static_error.thrum:3:11: error: parameter 'xs' should be list[m], got list[s]
+      3 | let bad = sum_m([1 s, 2 s])
+        |           ^

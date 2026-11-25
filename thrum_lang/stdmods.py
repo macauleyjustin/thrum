@@ -243,10 +243,31 @@ def mod_math(I):
     d["factors"] = Builtin("math.factors", _factors, (1,))
     d["linspace"] = Builtin("math.linspace", _linspace, (3,))
     d["arange"] = Builtin("math.arange", _arange, (2, 3))
+    def _shl(I, a, s):
+        x, k = I.needint(a[0], s), I.needint(a[1], s)
+        if k < 0 or k >= 63:
+            raise ThrumError("shift count out of range 0..62", s)
+        res = (x << k) & ((1 << 64) - 1)
+        if res >= (1 << 63):
+            res -= (1 << 64)
+        return mkq(float(res))
+
+    def _shr(I, a, s):
+        x, k = I.needint(a[0], s), I.needint(a[1], s)
+        if k < 0 or k >= 63:
+            raise ThrumError("shift count out of range 0..62", s)
+        return mkq(float(x >> k))
+
     d["dot"] = Builtin("math.dot", _dot, (2,))
     d["norm"] = Builtin("math.norm", _norm, (1,))
     d["cumsum"] = Builtin("math.cumsum", _cumsum, (1,))
     d["diff"] = Builtin("math.diff", _diff, (1,))
+    d["band"] = Builtin("math.band", lambda I, a, s: mkq(float(I.needint(a[0], s) & I.needint(a[1], s))), (2,))
+    d["bor"] = Builtin("math.bor", lambda I, a, s: mkq(float(I.needint(a[0], s) | I.needint(a[1], s))), (2,))
+    d["bxor"] = Builtin("math.bxor", lambda I, a, s: mkq(float(I.needint(a[0], s) ^ I.needint(a[1], s))), (2,))
+    d["bnot"] = Builtin("math.bnot", lambda I, a, s: mkq(float(~I.needint(a[0], s))), (1,))
+    d["shl"] = Builtin("math.shl", _shl, (2,))
+    d["shr"] = Builtin("math.shr", _shr, (2,))
     d["clamp"] = I.builtins.vars["clamp"]
     return Module("math", _scope_of(d, I))
 
@@ -501,6 +522,24 @@ def mod_text(I):
         except (IndexError, KeyError, ValueError) as ex:
             raise ThrumError("text.format error: %s" % ex, s)
 
+    def _ord(I, a, s):
+        t = _needstr(a[0], s, "text.ord")
+        if len(t) != 1:
+            raise ThrumError("text.ord expects a single character", s)
+        return mkq(float(ord(t)))
+
+    def _chr(I, a, s):
+        cp = I.needint(a[0], s)
+        if cp < 0 or cp > 0x10FFFF or 0xD800 <= cp <= 0xDFFF:
+            raise ThrumError("text.chr codepoint out of valid UTF-8 range", s)
+        return chr(cp)
+
+    def _from_hex(I, a, s):
+        try:
+            return mkq(float(int(_needstr(a[0], s, "text.from_hex").strip(), 16)))
+        except ValueError:
+            raise ThrumError("invalid hex integer", s)
+
     d = {
         "split": B["split"],
         "join": B["join"],
@@ -525,6 +564,11 @@ def mod_text(I):
         "is_digit": Builtin("text.is_digit", lambda I, a, s: _needstr(a[0], s, "text.is_digit").isdigit(), (1,)),
         "is_alpha": Builtin("text.is_alpha", lambda I, a, s: _needstr(a[0], s, "text.is_alpha").isalpha(), (1,)),
         "format": Builtin("text.format", _fmt, None),
+        "ord": Builtin("text.ord", _ord, (1,)),
+        "chr": Builtin("text.chr", _chr, (1,)),
+        "to_hex": Builtin("text.to_hex", lambda I, a, s: format(I.needint(a[0], s), "x"), (1,)),
+        "to_bin": Builtin("text.to_bin", lambda I, a, s: format(I.needint(a[0], s), "b"), (1,)),
+        "from_hex": Builtin("text.from_hex", _from_hex, (1,)),
     }
     return Module("text", _scope_of(d, I))
 

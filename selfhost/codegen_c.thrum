@@ -96,17 +96,6 @@ fn c_dim_lit(d):
 fn c_dim_expr(d):
     return "((TDim)" + c_dim_lit(d) + ")"
 
-fn c_type_ann(ann):
-    if ann == nil:
-        return "\{ANN_NONE, NULL, " + c_dim_lit(un.D0) + "}"
-    if ann.kind == "kind":
-        return "\{ANN_KIND, " + c_str_lit(ann.name) + ", " + c_dim_lit(un.D0) + "}"
-    if ann.kind == "dim":
-        return "\{ANN_DIM, " + c_str_lit(ann.sym) + ", " + c_dim_lit(ann.dim) + "}"
-    if ann.kind == "record":
-        return "\{ANN_RECORD, " + c_str_lit(ann.short) + ", " + c_dim_lit(un.D0) + "}"
-    return "\{ANN_NONE, NULL, " + c_dim_lit(un.D0) + "}"
-
 fn c_qty_expr(qv):
     if qv.disp == nil and qv.u == 0.0 and un.dimless(qv.dim):
         return "thrum_num_dimless(" + c_double(qv.v) + ")"
@@ -138,6 +127,35 @@ fn generate_c(checked, prog_path, stdlib_dir):
     fn new_id():
         seq += 1
         return seq
+
+    fn c_type_ann(ann):
+        if ann == nil:
+            return "\{ANN_NONE, NULL, " + c_dim_lit(un.D0) + ", 0, NULL}"
+        if ann.kind == "kind":
+            return "\{ANN_KIND, " + c_str_lit(ann.name) + ", " + c_dim_lit(un.D0) + ", 0, NULL}"
+        if ann.kind == "dim":
+            return "\{ANN_DIM, " + c_str_lit(ann.sym) + ", " + c_dim_lit(ann.dim) + ", 0, NULL}"
+        if ann.kind == "record":
+            return "\{ANN_RECORD, " + c_str_lit(ann.short) + ", " + c_dim_lit(un.D0) + ", 0, NULL}"
+        if ann.kind == "list_of":
+            let sub = c_type_ann(ann.elem)
+            let arr = "_ta_" + str(new_id())
+            protos = u.buf_push(protos, "static const TTypeAnn " + arr + "[1] = \{" + sub + "};")
+            return "\{ANN_LIST, " + c_str_lit(ann.disp) + ", " + c_dim_lit(un.D0) + ", 1, " + arr + "}"
+        if ann.kind == "map_of":
+            let ks = c_type_ann(ann.k)
+            let vs = c_type_ann(ann.v)
+            let arr = "_ta_" + str(new_id())
+            protos = u.buf_push(protos, "static const TTypeAnn " + arr + "[2] = \{" + ks + ", " + vs + "};")
+            return "\{ANN_MAP, " + c_str_lit(ann.disp) + ", " + c_dim_lit(un.D0) + ", 2, " + arr + "}"
+        if ann.kind == "union":
+            var items = []
+            for a in ann.alts:
+                items = push(items, c_type_ann(a))
+            let arr = "_ta_" + str(new_id())
+            protos = u.buf_push(protos, "static const TTypeAnn " + arr + "[" + str(len(items)) + "] = \{" + join(", ", items) + "};")
+            return "\{ANN_UNION, " + c_str_lit(ann.disp) + ", " + c_dim_lit(un.D0) + ", " + str(len(items)) + ", " + arr + "}"
+        return "\{ANN_NONE, NULL, " + c_dim_lit(un.D0) + ", 0, NULL}"
 
     fn add(line_s):
         let pad = "    " * indent
@@ -1079,5 +1097,5 @@ fn generate_c(checked, prog_path, stdlib_dir):
     if funcs_str != "":
         out = u.buf_push(out, funcs_str + "\n")
     out = u.buf_push(out, "static void _thrum_main_body(TRuntime* rt, TEnv* env) \{\n    int _fn_root = rt->root_top;\n    (void)_fn_root; (void)env;\n" + main_body_c + "\n}\n")
-    out = u.buf_push(out, "int main(int argc, char** argv) \{\n    TRuntime* rt = thrum_init(argc, argv);\n    rt->prog_path = " + c_str_lit(entry.info.path) + ";\n    rt->prog_lines = _thrum_src_lines;\n    rt->prog_nlines = " + n_lines_expr + ";\n    T_FRAME(rt);\n    _thrum_main_body(rt, rt->globals);\n    T_END_FRAME(rt);\n    thrum_finish(rt);\n    return 0;\n}")
+    out = u.buf_push(out, "int main(int argc, char** argv) \{\n    TRuntime* rt = thrum_init(argc, argv);\n#ifdef THRUM_GRAPH_FMT\n    FILE* _gnul = fopen(\"/dev/null\", \"w\");\n    if (_gnul) rt->out = _gnul;\n#endif\n    rt->prog_path = " + c_str_lit(entry.info.path) + ";\n    rt->prog_lines = _thrum_src_lines;\n    rt->prog_nlines = " + n_lines_expr + ";\n    T_FRAME(rt);\n    _thrum_main_body(rt, rt->globals);\n    T_END_FRAME(rt);\n#ifdef THRUM_GRAPH_FMT\n    thrum_drain(rt);\n    rt->out = stdout;\n    if (_gnul) fclose(_gnul);\n    thrum_export_graph(rt, rt->globals, THRUM_GRAPH_SYM, THRUM_GRAPH_FMT);\n#endif\n#ifdef THRUM_REPL_VARS\n    thrum_drain(rt);\n    thrum_dump_vars(rt, rt->globals);\n#endif\n    thrum_finish(rt);\n    return 0;\n}")
     return u.buf_join(out, "\n") + "\n"

@@ -79,12 +79,54 @@ class ModTy(_Ty):
         return "module(%s)" % self.name
 
 
+class ListTy(_Ty):
+    __slots__ = ("elem",)
+
+    def __init__(self, elem):
+        self.elem = elem
+
+    def __repr__(self):
+        return "list[%s]" % _ty_label(self.elem) if self.elem is not ANY else "list"
+
+
+class MapTy(_Ty):
+    __slots__ = ("k", "v")
+
+    def __init__(self, k, v):
+        self.k = k
+        self.v = v
+
+    def __repr__(self):
+        if self.k is ANY and self.v is ANY:
+            return "map"
+        return "map[%s, %s]" % (_ty_label(self.k), _ty_label(self.v))
+
+
+class UnionTy(_Ty):
+    __slots__ = ("alts", "label")
+
+    def __init__(self, alts, label=None):
+        self.alts = alts
+        self.label = label or " | ".join(_ty_label(a) for a in alts)
+
+    def __repr__(self):
+        return self.label
+
+
 TEXT_TY = KindTy("text")
 BOOL_TY = KindTy("bool")
 LIST_TY = KindTy("list")
 MAP_TY = KindTy("map")
 NIL_TY = KindTy("nil")
 DIMLESS_TY = NumTy(D0)
+
+
+def _is_list_ty(t):
+    return isinstance(t, ListTy) or (isinstance(t, KindTy) and t.kind == "list")
+
+
+def _is_map_ty(t):
+    return isinstance(t, MapTy) or (isinstance(t, KindTy) and t.kind == "map")
 
 
 def _ty_from_ann(ann, sc, site):
@@ -98,6 +140,12 @@ def _ty_from_ann(ann, sc, site):
         return KindTy(ann[1])
     if ann[0] == "dim":
         return NumTy(ann[1])
+    if ann[0] == "list_of":
+        return ListTy(_ty_from_ann(ann[1], sc, site))
+    if ann[0] == "map_of":
+        return MapTy(_ty_from_ann(ann[1], sc, site), _ty_from_ann(ann[2], sc, site))
+    if ann[0] == "union":
+        return UnionTy([_ty_from_ann(a, sc, site) for a in ann[1]], ann[2])
     if ann[0] == "record":
         _, short_name, full_name = ann
         if "." in full_name:
@@ -121,6 +169,10 @@ def _ty_from_ann(ann, sc, site):
 def _ty_matches(actual, expected):
     if actual is ANY or expected is ANY:
         return True
+    if isinstance(actual, UnionTy):
+        return all(_ty_matches(a, expected) for a in actual.alts)
+    if isinstance(expected, UnionTy):
+        return any(_ty_matches(actual, alt) for alt in expected.alts)
     if isinstance(expected, NumTy):
         if not isinstance(actual, NumTy):
             return False
@@ -129,7 +181,19 @@ def _ty_matches(actual, expected):
         return True
     if isinstance(expected, RecordTy):
         return isinstance(actual, RecordTy) and actual.name == expected.name
+    if isinstance(expected, ListTy):
+        if isinstance(actual, KindTy) and actual.kind == "list":
+            return True
+        return isinstance(actual, ListTy) and _ty_matches(actual.elem, expected.elem)
+    if isinstance(expected, MapTy):
+        if isinstance(actual, KindTy) and actual.kind == "map":
+            return True
+        return isinstance(actual, MapTy) and _ty_matches(actual.k, expected.k) and _ty_matches(actual.v, expected.v)
     if isinstance(expected, KindTy):
+        if expected.kind == "list" and isinstance(actual, ListTy):
+            return True
+        if expected.kind == "map" and isinstance(actual, MapTy):
+            return True
         if expected.kind == "fn":
             return isinstance(actual, FnTy) or (isinstance(actual, KindTy) and actual.kind == "fn")
         return isinstance(actual, KindTy) and actual.kind == expected.kind
@@ -141,6 +205,8 @@ def _ty_label(ty):
         if ty.dim is None:
             return "num"
         return dimstr(ty.dim) or "dimensionless"
+    if isinstance(ty, UnionTy):
+        return ty.label
     return repr(ty)
 
 
@@ -157,6 +223,12 @@ def _stdmod_exports(name):
             "isfinite": FnTy([("x", NumTy(None), False)], BOOL_TY),
             "isnan": FnTy([("x", NumTy(None), False)], BOOL_TY),
             "isinf": FnTy([("x", NumTy(None), False)], BOOL_TY),
+            "band": FnTy([("a", DIMLESS_TY, False), ("b", DIMLESS_TY, False)], DIMLESS_TY),
+            "bor": FnTy([("a", DIMLESS_TY, False), ("b", DIMLESS_TY, False)], DIMLESS_TY),
+            "bxor": FnTy([("a", DIMLESS_TY, False), ("b", DIMLESS_TY, False)], DIMLESS_TY),
+            "bnot": FnTy([("a", DIMLESS_TY, False)], DIMLESS_TY),
+            "shl": FnTy([("a", DIMLESS_TY, False), ("k", DIMLESS_TY, False)], DIMLESS_TY),
+            "shr": FnTy([("a", DIMLESS_TY, False), ("k", DIMLESS_TY, False)], DIMLESS_TY),
         }
         for fnm in ("sin", "cos", "tan", "asin", "acos", "atan", "exp", "expm1", "ln", "log1p", "log10", "log2", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh"):
             ex[fnm] = FnTy([("x", DIMLESS_TY, False)], DIMLESS_TY)
@@ -269,14 +341,27 @@ def check_program(prog, path=None, seen=None, stdmods=None):
                     check_expr(p, sc, deferred)
             return TEXT_TY
         if k == "list":
-            for x in n.items:
-                check_expr(x, sc, deferred)
-            return LIST_TY
+            et = ANY
+            if n.items:
+                et = check_expr(n.items[0], sc, deferred)
+                for x in n.items[1:]:
+                    xt = check_expr(x, sc, deferred)
+                    if not (_ty_matches(xt, et) and _ty_matches(et, xt)):
+                        et = ANY
+            return ListTy(et)
         if k == "map":
-            for kn, vn in n.entries:
-                check_expr(kn, sc, deferred)
-                check_expr(vn, sc, deferred)
-            return MAP_TY
+            kt, vt = ANY, ANY
+            if n.entries:
+                kt = check_expr(n.entries[0][0], sc, deferred)
+                vt = check_expr(n.entries[0][1], sc, deferred)
+                for kn, vn in n.entries[1:]:
+                    kt2 = check_expr(kn, sc, deferred)
+                    vt2 = check_expr(vn, sc, deferred)
+                    if not (_ty_matches(kt2, kt) and _ty_matches(kt, kt2)):
+                        kt = ANY
+                    if not (_ty_matches(vt2, vt) and _ty_matches(vt, vt2)):
+                        vt = ANY
+            return MapTy(kt, vt)
         if k == "bin":
             return check_bin(n, sc, deferred)
         if k == "un":
@@ -381,8 +466,12 @@ def check_program(prog, path=None, seen=None, stdmods=None):
                 return rt
             return ANY
         if k == "index":
-            check_expr(n.obj, sc, deferred)
+            ot = check_expr(n.obj, sc, deferred)
             check_expr(n.idx, sc, deferred)
+            if isinstance(ot, ListTy):
+                return ot.elem
+            if isinstance(ot, MapTy):
+                return ot.v
             return ANY
         if k == "slice":
             ot = check_expr(n.obj, sc, deferred)
@@ -392,7 +481,7 @@ def check_program(prog, path=None, seen=None, stdmods=None):
                 check_expr(n.stop, sc, deferred)
             if n.step is not None:
                 check_expr(n.step, sc, deferred)
-            return ot if isinstance(ot, KindTy) and ot.kind in ("list", "text") else ANY
+            return ot if _is_list_ty(ot) or ot == TEXT_TY else ANY
         if k == "dot":
             ot = check_expr(n.obj, sc, deferred)
             if isinstance(ot, ModTy):
@@ -465,9 +554,9 @@ def check_program(prog, path=None, seen=None, stdmods=None):
                         )
                     return NumTy(lt.dim)
                 return NumTy(lt.dim if lt.dim is not None else rt.dim)
-            if op == "+" and isinstance(lt, KindTy) and isinstance(rt, KindTy) and lt.kind == rt.kind and lt.kind in ("text", "list", "map"):
-                return lt
-            if lt is not ANY and rt is not ANY and type(lt) is not type(rt):
+            if op == "+" and ((isinstance(lt, KindTy) and isinstance(rt, KindTy) and lt.kind == rt.kind == "text") or (_is_list_ty(lt) and _is_list_ty(rt)) or (_is_map_ty(lt) and _is_map_ty(rt))):
+                return lt if lt == rt else (LIST_TY if _is_list_ty(lt) else (MAP_TY if _is_map_ty(lt) else lt))
+            if lt is not ANY and rt is not ANY and not isinstance(lt, UnionTy) and not isinstance(rt, UnionTy) and not _ty_matches(lt, rt) and not _ty_matches(rt, lt):
                 raise ThrumError(
                     "cannot %s %s and %s" % ("add" if op == "+" else "subtract", _ty_label(lt), _ty_label(rt)),
                     n.site,
@@ -629,13 +718,21 @@ def check_program(prog, path=None, seen=None, stdmods=None):
                 check_block(n.els, sc, expected_ret=expected_ret, fn_name=fn_name)
             return
         if k == "for":
-            check_expr(n.iter, sc, deferred)
+            it_ty = check_expr(n.iter, sc, deferred)
             sub = _CheckScope(sc, rel=False)
-            sub.names[n.a] = "local"
-            sub.types[n.a] = ANY
             if n.b:
-                sub.names[n.b] = "local"
-                sub.types[n.b] = ANY
+                if isinstance(it_ty, ListTy):
+                    sub.names[n.a], sub.types[n.a] = "local", DIMLESS_TY
+                    sub.names[n.b], sub.types[n.b] = "local", it_ty.elem
+                elif isinstance(it_ty, MapTy):
+                    sub.names[n.a], sub.types[n.a] = "local", it_ty.k
+                    sub.names[n.b], sub.types[n.b] = "local", it_ty.v
+                else:
+                    sub.names[n.a], sub.types[n.a] = "local", ANY
+                    sub.names[n.b], sub.types[n.b] = "local", ANY
+            else:
+                sub.names[n.a] = "local"
+                sub.types[n.a] = it_ty.elem if isinstance(it_ty, ListTy) else (it_ty.k if isinstance(it_ty, MapTy) else ANY)
             check_block(n.body, sub, expected_ret=expected_ret, fn_name=fn_name)
             return
         if k == "while":

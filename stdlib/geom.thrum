@@ -1,0 +1,125 @@
+# Dimension-checked 2D Euclidean computational geometry in pure Thrum.
+
+use math
+use "./algo.thrum" as algo
+
+# 2D point in meters.
+record Pt2:
+    x: m
+    y: m = 0 m
+
+# Axis-aligned bounding rectangle in meters.
+record Rect:
+    x: m
+    y: m
+    w: m
+    h: m
+
+# Circle defined by center (cx, cy) and radius r in meters.
+record Circle:
+    cx: m
+    cy: m
+    r: m
+
+# Euclidean distance between two 2D points.
+fn dist(a: Pt2, b: Pt2) -> m:
+    return math.hypot(b.x - a.x, b.y - a.y)
+
+# Squared distance (avoids sqrt when comparing distances).
+fn dist_sq(a: Pt2, b: Pt2) -> m^2:
+    let dx = b.x - a.x
+    let dy = b.y - a.y
+    return dx * dx + dy * dy
+
+# 2D signed cross product (b - a) x (c - a) with area dimension m^2.
+fn cross2(a: Pt2, b: Pt2, c: Pt2) -> m^2:
+    return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+
+# Area of a rectangle in square meters.
+fn rect_area(r: Rect) -> m^2:
+    return r.w * r.h
+
+# True when two axis-aligned rectangles overlap or touch.
+fn rect_intersects(a: Rect, b: Rect) -> bool:
+    return not (a.x + a.w < b.x or b.x + b.w < a.x or a.y + a.h < b.y or b.y + b.h < a.y)
+
+# Area of a circle in square meters.
+fn circle_area(c: Circle) -> m^2:
+    return math.pi * c.r * c.r
+
+# True when point p lies inside or on circle c.
+fn circle_contains(c: Circle, p: Pt2) -> bool:
+    let dx = p.x - c.cx
+    let dy = p.y - c.cy
+    return dx * dx + dy * dy <= c.r * c.r
+
+# Polygon area via Shoelace formula (returns non-negative m^2).
+fn poly_area(pts: list[Pt2]) -> m^2:
+    let n = len(pts)
+    if n < 3:
+        return 0 m^2
+    var twice = 0 m^2
+    for i in 0..<n:
+        let j = (i + 1) % n
+        twice += pts[i].x * pts[j].y - pts[j].x * pts[i].y
+    return abs(twice) * 0.5
+
+# Centroid (center of mass of uniform polygon) -> Pt2.
+fn poly_centroid(pts: list[Pt2]) -> Pt2:
+    requires len(pts) >= 3, "polygon needs at least 3 vertices"
+    let n = len(pts)
+    var sa = 0 m^2
+    var cx = 0 m^3
+    var cy = 0 m^3
+    for i in 0..<n:
+        let j = (i + 1) % n
+        let cr = pts[i].x * pts[j].y - pts[j].x * pts[i].y
+        sa += cr
+        cx += (pts[i].x + pts[j].x) * cr
+        cy += (pts[i].y + pts[j].y) * cr
+    let area6 = sa * 3
+    if area6 == 0 m^2:
+        fail "degenerate zero-area polygon"
+    return Pt2(cx / area6, cy / area6)
+
+# Ray-casting point-in-polygon test.
+fn point_in_poly(p: Pt2, pts: list[Pt2]) -> bool:
+    let n = len(pts)
+    var inside = false
+    var j = n - 1
+    for i in 0..<n:
+        let a = pts[i]
+        let b = pts[j]
+        if ((a.y > p.y) != (b.y > p.y)) and (p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x):
+            inside = not inside
+        j = i
+    return inside
+
+fn _pt_less(a: Pt2, b: Pt2) -> bool:
+    if a.x != b.x:
+        return a.x < b.x
+    return a.y < b.y
+
+# 2D convex hull via Andrew's monotone chain (CCW order, no duplicate endpoints).
+fn convex_hull(pts: list[Pt2]) -> list[Pt2]:
+    if len(pts) <= 1:
+        return pts
+    let s = algo.msort_by(pts, _pt_less)
+    var lower = []
+    for p in s:
+        while len(lower) >= 2 and cross2(lower[len(lower) - 2], lower[len(lower) - 1], p) <= 0 m^2:
+            lower = pop(lower)
+        lower = push(lower, p)
+    var upper = []
+    var i = len(s) - 1
+    while i >= 0:
+        let p = s[i]
+        while len(upper) >= 2 and cross2(upper[len(upper) - 2], upper[len(upper) - 1], p) <= 0 m^2:
+            upper = pop(upper)
+        upper = push(upper, p)
+        i -= 1
+    if len(lower) > 0:
+        lower = pop(lower)
+    if len(upper) > 0:
+        upper = pop(upper)
+    return concat(lower, upper)

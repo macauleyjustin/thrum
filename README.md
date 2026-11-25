@@ -18,9 +18,9 @@ Thrum is a reactive, dimension-checked, explainable, capability-sandboxed progra
 - **Live reactive relations (`var`, `let`, `pin`, `live`, `settle`, `on`):** Standing equations recompute automatically in height-ordered topological waves—glitch-free, purity-checked, and with built-in mutual fixpoint relaxation (`settle`).
 - **Physical quantities as the single numeric type (`72 ± 0.5 kg`, `as ft`):** Every number carries an exact 7-base SI dimension vector `(m, kg, s, A, K, mol, cd)` and first-order Gaussian uncertainty `σ` propagated through arithmetic, powers, and math functions.
 - **Explainability & counterfactuals (`why`, `budget`, `whatif`):** Inspect live dependency derivation trees, rank uncertainty contributions by input, and evaluate isolated hypotheticals without mutating program state.
-- **Immutable values & copy-on-write reactivity:** Typed `record`s, lists, and maps use value semantics with pattern matching (`match`/`case`), triggering reactive updates cleanly on indexed or field assignment (`p.x = 5 m`, `xs[0] = 10`).
+- **Immutable values, typed containers & unions:** Typed `record`s, `list[T]`, `map[K, V]`, `T | U`, and optional `T?` annotations with structural checks, pattern matching (`match`/`case`), and Copy-on-Write reactivity (`p.x = 5 m`, `xs[0] = 10`).
 - **Capability safety & deterministic replay (`with`, `--journal`, `--replay`):** Pure expressions and relations have **no ambient authority**; external effects (`io`, `fs`, `clock`, `rand`, `env`, `args`, `tty`, `proc`, `gui`, `net`) require explicit capabilities that can be journaled and deterministically replayed.
-- **Self-hosted native binaries + macOS Desktop GUI:** Compile `.thrum` programs—including a pure-Thrum desktop **web browser** (`examples/browser.thrum`), Klondike Solitaire (`examples/solitaire.thrum`), and ANSI terminal Tetris (`examples/tetris.thrum`)—directly to standalone executables with zero Python runtime dependency.
+- **Self-hosted native toolchain & full CLI (`thrumc`):** Compile `.thrum` programs—including live ANSI simulations and terminal apps (`examples/tetris.thrum`)—directly to standalone native executables (`build`, `run`, `emit-c`, `check`, `ast`, `graph`, `fmt`, `doc`, `units`, `test`, `repl`, `version`) with zero Python runtime dependency.
 
 ---
 
@@ -54,23 +54,22 @@ with io:
 ### Build Standalone Toolchain & Sample Apps (macOS / C11)
 
 ```bash
-make                # builds runtime/libthrumrt.a, ./thrumc, ./tetris, ./solitaire, ./browser
-make bootstrap      # verifies 3-stage self-hosting fixed point (Stage 1 == Stage 2)
-make app            # packages ./ThrumSolitaire.app and ./ThrumBrowser.app with AppIcon.icns
+make                # builds runtime/libthrumrt.a, ./thrumc, ./tetris
+make bootstrap      # verifies 3-stage self-hosting fixed point (Stage 2 == Stage 3)
 ```
 
-Run the compiled apps and compiler:
+Run the compiler, REPL, and examples:
 
 ```bash
 ./thrumc version
-./thrumc check examples/bmi.thrum
-./thrumc build examples/browser.thrum -o browser
+./thrumc check examples/nbody_sim.thrum
+./thrumc build examples/tetris.thrum -o tetris
 ./thrumc run examples/lab_pipeline.thrum
+./thrumc graph examples/bmi.thrum --format mermaid
+./thrumc repl
 
-./browser                   # launches native Cocoa GUI Thrum Web Browser
-./solitaire                 # launches native Cocoa GUI Klondike Solitaire
 ./tetris                    # launches interactive terminal ANSI Tetris
-./tetris --demo 25 --plain  # AI demo run
+./tetris --demo 25 --plain  # deterministic AI demo run
 ```
 
 ### Run Conformance & Self-Test Suites
@@ -78,13 +77,12 @@ Run the compiled apps and compiler:
 ```bash
 ./thrumc test                        # bundled native language self-tests
 ./thrumc test tests/stdlib_test.thrum
-./thrumc test tests/browser_test.thrum
-make test                            # native conformance, stdlib, browser, headless GUI & Python reference suites
+make test                            # native conformance (0 skipped), stdlib, headless GUI & Python suite
 ```
 
 ### Optional Pure-Python Reference Toolchain
 
-Thrum also ships the zero-dependency Python 3.9+ reference interpreter, formatter, AST inspector, dependency graph exporter (`--format mermaid|dot`), and REPL:
+Thrum also ships a zero-dependency Python 3.9+ reference interpreter in `thrum_lang/` sharing conformance parity with `./thrumc`:
 
 ```bash
 python3 thrum.py test
@@ -104,9 +102,9 @@ Thrum follows Python Software Foundation-style documentation organized by audien
 | **[What's New in 0.2](docs/whatsnew.md)** | Summary of Thrum 0.2 features, self-hosting compiler, and native GUI |
 | **[The Thrum Tutorial](docs/tutorial.md)** | Guided tour from installation through reactive graphs, units, contracts, and GUIs |
 | **[Language Reference](docs/reference.md)** | Exact lexical rules, data model, propagation semantics, statements, and grammar |
-| **[Standard Library Reference](docs/library.md)** | Built-in functions, 13 built-in modules, 5 `std.*` modules, capabilities, and units |
+| **[Standard Library Reference](docs/library.md)** | Built-in functions, 13 built-in modules, 10 `std.*` modules, capabilities, and units |
 | **[Compiler & Runtime Internals](docs/internals.md)** | How Thrum works: self-hosted C11 codegen, 3-stage bootstrap, GC, DAG solver, Cocoa backend |
-| **[CLI, Makefile & Packaging](docs/cli.md)** | Complete reference for `thrumc`, `thrum.py`, journaling flags, and `.app` bundling |
+| **[CLI & Makefile Guide](docs/cli.md)** | Complete reference for `thrumc`, `thrum.py`, journaling flags, `repl`, `graph`, `ast` |
 | **[Normative Spec](SPEC.md) & [Non-Goals](NON_GOALS.md)** | Language invariants and intentional design exclusions |
 
 ---
@@ -114,10 +112,10 @@ Thrum follows Python Software Foundation-style documentation organized by audien
 ## Project Layout
 
 - **[`selfhost/`](selfhost/thrumc.thrum)** — Self-hosted Thrum compiler written in Thrum (`lexer`, `parser`, `checker`, `units`, `codegen_c`, `util`, `thrumc`)
-- **[`runtime/`](runtime/thrum_rt.h)** — Zero-dependency C11 runtime + mark-sweep GC + reactive graph engine + native macOS Cocoa GUI & HTTPS backends (`rt_gui_cocoa.m`, `rt_net_apple.m`)
-- **[`stdlib/`](stdlib/physics.thrum)** — Pure-Thrum domain modules (`std.vec`, `std.physics`, `std.signal`, `std.finance`, `std.matrix`)
-- **[`examples/`](examples/browser.thrum)** — Showcase programs including the desktop Web Browser (`examples/browser.thrum`), Cocoa GUI Klondike Solitaire, terminal Tetris, N-body simulation, and thermostat fixpoint
-- **[`tests/`](tests/run_native_tests.py)** — Conformance cases, native & Python test runners, stdlib tests, and browser engine tests
+- **[`runtime/`](runtime/thrum_rt.h)** — Zero-dependency C11 runtime + mark-sweep GC + O(1) string interning + reactive graph engine + native macOS Cocoa GUI & HTTPS backends (`rt_gui_cocoa.m`, `rt_net_apple.m`)
+- **[`stdlib/`](stdlib/physics.thrum)** — Pure-Thrum standard library (`std.vec`, `std.physics`, `std.signal`, `std.finance`, `std.matrix`, `std.algo`, `std.num`, `std.geom`, `std.prob`, `std.complex`)
+- **[`examples/`](examples/tetris.thrum)** — Language examples including terminal Tetris, N-body simulation, lab data pipeline, and thermostat fixpoint
+- **[`tests/`](tests/run_native_tests.py)** — 123 conformance tests, native & Python runners, and stdlib test suite
 - **[`thrum_lang/`](thrum_lang/cli.py)** — Pure Python 3.9+ reference interpreter and developer tooling (`thrum.py`)
 - **[`docs/`](docs/index.md)** — Full PSF-style language documentation book
 - **[`assets/`](assets/thrum_logo.png)** — Thrum emblem logo assets

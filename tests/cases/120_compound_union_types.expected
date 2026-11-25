@@ -1,0 +1,6 @@
+3 m
+2 kg nil
+5 m ok
+2 nil
+element 0 of parameter 'xs' should have dimension m, got s
+parameter 'v' should be m | text, got num

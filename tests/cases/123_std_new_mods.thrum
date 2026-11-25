@@ -1,0 +1,16 @@
+use std.algo
+use std.num
+use std.geom
+use std.prob
+use std.complex
+
+with io:
+    let xs = algo.msort([9, 3, 7, 1])
+    io.say(xs, algo.bsearch(xs, 7), algo.freq(["a", "b", "a"]).a)
+    let area = num.simpson(fn(x: m) -> m: return x, 0 m, 6 m, 20)
+    io.say(round(area, 6))
+    let tri = [geom.Pt2(0 m, 0 m), geom.Pt2(4 m, 0 m), geom.Pt2(0 m, 3 m)]
+    io.say(geom.poly_area(tri))
+    io.say(round(prob.normal_cdf(0, 0, 1), 4), prob.binomial_pmf(2, 4, 0.5))
+    let p = complex.cmul(complex.Complex(1, 2), complex.Complex(3, -4))
+    io.say(p.re, p.im, complex.cmag(complex.Complex(3, 4)))

@@ -4,8 +4,8 @@
 
 Thrum provides two command-line interfaces and a unified `Makefile`:
 
-1. **`thrumc`** — The standalone native compiled CLI written in Thrum (`selfhost/thrumc.thrum`). It emits C11, links against `runtime/libthrumrt.a`, and runs natively with zero Python dependencies.
-2. **`thrum.py`** — The pure-Python 3.9+ reference interpreter CLI (`thrum_lang/cli.py`), useful for REPL sessions, dependency graph export (`dot`/`mermaid`), and AST inspection.
+1. **`thrumc`** — The standalone native compiled CLI written in Thrum (`selfhost/thrumc.thrum`). It emits C11, links against `runtime/libthrumrt.a`, and implements the full toolchain (`build`, `run`, `emit-c`, `check`, `ast`, `graph`, `fmt`, `doc`, `units`, `test`, `repl`, `version`) natively with zero Python dependencies.
+2. **`thrum.py`** — The pure-Python 3.9+ reference interpreter CLI (`thrum_lang/cli.py`), sharing conformance parity across all commands.
 
 ---
 
@@ -24,7 +24,7 @@ When invoked outside the repository root, `thrumc` searches `$THRUM_HOME`, its o
 Compile a `.thrum` file (and all transitively `use`d modules) into a standalone native binary:
 
 ```bash
-./thrumc build examples/solitaire.thrum -o solitaire
+./thrumc build examples/tetris.thrum -o tetris
 ```
 
 | Flag | Description |
@@ -60,7 +60,7 @@ Generate portable C11 source without invoking the C compiler:
 Run static syntax, scope, capability, module, and dimensional/type analysis without executing the program:
 
 ```bash
-./thrumc check examples/solitaire.thrum
+./thrumc check examples/nbody_sim.thrum
 ```
 
 Exits `0` printing `<file>: ok`, or exits `1` with `file:line:col: error:` diagnostics and carets.
@@ -104,6 +104,30 @@ Run bundled language self-tests (`16` core semantics tests) or recursively disco
 ./thrumc test tests/
 ```
 
+### `ast`
+
+Pretty-print the parsed AST for `<file>`:
+
+```bash
+./thrumc ast examples/bmi.thrum
+```
+
+### `graph`
+
+Execute `<file>` and export the live reactive cell dependency graph as Graphviz DOT (`--format dot`) or Mermaid (`--format mermaid`), optionally rooted at `[symbol]`:
+
+```bash
+./thrumc graph examples/bmi.thrum bmi --format mermaid
+```
+
+### `repl`
+
+Start the interactive native Thrum REPL supporting `:vars`, `:why <name>`, `:budget <name>`, `:units [q]`, `:reset`, and `:quit`:
+
+```bash
+./thrumc repl
+```
+
 ### `version`
 
 ```bash
@@ -132,33 +156,18 @@ Example:
 
 ---
 
-## 3. Python Reference CLI (`thrum.py`)
-
-When running via Python 3.9+, `thrum.py` provides additional interactive and inspection commands:
-
-| Command | Purpose |
-| :--- | :--- |
-| `python3 thrum.py repl` | Interactive REPL supporting `:vars`, `:why <name>`, `:budget <name>`, `:units [q]`, `:reset`. |
-| `python3 thrum.py ast FILE` | Pretty-print the parsed AST. |
-| `python3 thrum.py graph FILE [SYM] --format mermaid\|dot` | Export the runtime reactive cell graph as Mermaid or Graphviz DOT. |
-
----
-
-## 4. `Makefile` Targets & macOS `.app` Packaging
+## 3. `Makefile` Targets
 
 | Target | Action |
 | :--- | :--- |
-| `make` / `make all` | Build C/Cocoa runtime (`libthrumrt.a`, `rt_gui_*`, `rt_net_*`), `./thrumc`, `./tetris`, `./solitaire`, and `./browser`. |
+| `make` / `make all` | Build C/Cocoa runtime (`libthrumrt.a`, `rt_gui_*`, `rt_net_*`), `./thrumc`, and `./tetris`. |
 | `make runtime` | Compile the C11 runtime archive, GUI backends, and `net` backends with `-Wall -Wextra -Werror`. |
 | `make thrumc` | Compile Stage 1 & Stage 2 `./thrumc` from `selfhost/*.thrum`. |
 | `make bootstrap` | Emit Stage 2 and Stage 3 C outputs and verify `diff -u` is byte-identical. |
 | `make tetris` | Compile standalone `./tetris` binary. |
-| `make solitaire` | Compile standalone `./solitaire` binary with Cocoa framework. |
-| `make browser` | Compile standalone `./browser` web browser binary with Cocoa + Foundation HTTPS networking. |
-| `make app` | Package `ThrumSolitaire.app` and `ThrumBrowser.app` with `Info.plist` and `AppIcon.icns` from `assets/thrum_logo.png`. |
-| `make native-test` | Run `tests/run_native_tests.py` (conformance cases, native self-tests, stdlib & browser suites, headless GUI/browser checks). |
+| `make native-test` | Run `tests/run_native_tests.py` (all conformance cases with 0 skipped, native self-tests, stdlib suite, headless GUI check). |
 | `make test` | Run `native-test` plus all Python reference test suites. |
-| `make clean` | Remove build artifacts, libraries, binaries, and `.app` bundles. |
+| `make clean` | Remove build artifacts and compiled binaries. |
 
 ---
 

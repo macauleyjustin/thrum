@@ -1436,6 +1436,38 @@ static TVal m_diff(TRuntime* rt, int argc, TVal* argv, int line, int col) {
     return out;
 }
 
+static TVal m_band(TRuntime* rt, int argc, TVal* argv, int line, int col) {
+    (void)argc;
+    return thrum_num_dimless((double)(thrum_need_int(rt, argv[0], line, col) & thrum_need_int(rt, argv[1], line, col)));
+}
+static TVal m_bor(TRuntime* rt, int argc, TVal* argv, int line, int col) {
+    (void)argc;
+    return thrum_num_dimless((double)(thrum_need_int(rt, argv[0], line, col) | thrum_need_int(rt, argv[1], line, col)));
+}
+static TVal m_bxor(TRuntime* rt, int argc, TVal* argv, int line, int col) {
+    (void)argc;
+    return thrum_num_dimless((double)(thrum_need_int(rt, argv[0], line, col) ^ thrum_need_int(rt, argv[1], line, col)));
+}
+static TVal m_bnot(TRuntime* rt, int argc, TVal* argv, int line, int col) {
+    (void)argc;
+    return thrum_num_dimless((double)(~thrum_need_int(rt, argv[0], line, col)));
+}
+static TVal m_shl(TRuntime* rt, int argc, TVal* argv, int line, int col) {
+    (void)argc;
+    int64_t a = thrum_need_int(rt, argv[0], line, col);
+    int64_t k = thrum_need_int(rt, argv[1], line, col);
+    if (k < 0 || k >= 63) thrum_error(rt, line, col, "shift count out of range 0..62", NULL);
+    return thrum_num_dimless((double)(int64_t)((uint64_t)a << k));
+}
+static TVal m_shr(TRuntime* rt, int argc, TVal* argv, int line, int col) {
+    (void)argc;
+    int64_t a = thrum_need_int(rt, argv[0], line, col);
+    int64_t k = thrum_need_int(rt, argv[1], line, col);
+    if (k < 0 || k >= 63) thrum_error(rt, line, col, "shift count out of range 0..62", NULL);
+    int64_t res = (a < 0) ? ~((~a) >> k) : (a >> k);
+    return thrum_num_dimless((double)res);
+}
+
 static TEnv* build_mod_math(TRuntime* rt) {
     TEnv* sc = thrum_env_new(rt, rt->builtins, false);
     mod_add_val(rt, sc, "pi", thrum_num_dimless(3.14159265358979323846));
@@ -1483,6 +1515,12 @@ static TEnv* build_mod_math(TRuntime* rt) {
     mod_add(rt, sc, "math", "norm", m_norm, 1, 1);
     mod_add(rt, sc, "math", "cumsum", m_cumsum, 1, 1);
     mod_add(rt, sc, "math", "diff", m_diff, 1, 1);
+    mod_add(rt, sc, "math", "band", m_band, 2, 2);
+    mod_add(rt, sc, "math", "bor", m_bor, 2, 2);
+    mod_add(rt, sc, "math", "bxor", m_bxor, 2, 2);
+    mod_add(rt, sc, "math", "bnot", m_bnot, 1, 1);
+    mod_add(rt, sc, "math", "shl", m_shl, 2, 2);
+    mod_add(rt, sc, "math", "shr", m_shr, 2, 2);
     mod_alias_builtin(rt, sc, "clamp", "clamp", 0, 0);
     return sc;
 }
@@ -2047,6 +2085,98 @@ static TVal tx_format(TRuntime* rt, int argc, TVal* argv, int line, int col) {
     return out;
 }
 
+static TVal tx_ord(TRuntime* rt, int argc, TVal* argv, int line, int col) {
+    (void)argc;
+    TStr* s = need_str(rt, argv[0], "text.ord", line, col);
+    if (s->ulen != 1) thrum_error(rt, line, col, "text.ord expects a single character", NULL);
+    const unsigned char* p = (const unsigned char*)s->data;
+    uint32_t cp = 0;
+    if (p[0] < 0x80) cp = p[0];
+    else if ((p[0] & 0xE0) == 0xC0 && s->len >= 2) cp = ((uint32_t)(p[0] & 0x1F) << 6) | (p[1] & 0x3F);
+    else if ((p[0] & 0xF0) == 0xE0 && s->len >= 3) cp = ((uint32_t)(p[0] & 0x0F) << 12) | ((uint32_t)(p[1] & 0x3F) << 6) | (p[2] & 0x3F);
+    else if ((p[0] & 0xF8) == 0xF0 && s->len >= 4) cp = ((uint32_t)(p[0] & 0x07) << 18) | ((uint32_t)(p[1] & 0x3F) << 12) | ((uint32_t)(p[2] & 0x3F) << 6) | (p[3] & 0x3F);
+    else cp = p[0];
+    return thrum_num_dimless((double)cp);
+}
+
+static TVal tx_chr(TRuntime* rt, int argc, TVal* argv, int line, int col) {
+    (void)argc;
+    int64_t cp = thrum_need_int(rt, argv[0], line, col);
+    if (cp < 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+        thrum_error(rt, line, col, "text.chr codepoint out of valid UTF-8 range", NULL);
+    }
+    char buf[5];
+    size_t n = 0;
+    if (cp <= 0x7F) {
+        buf[0] = (char)cp; n = 1;
+    } else if (cp <= 0x7FF) {
+        buf[0] = (char)(0xC0 | (cp >> 6));
+        buf[1] = (char)(0x80 | (cp & 0x3F));
+        n = 2;
+    } else if (cp <= 0xFFFF) {
+        buf[0] = (char)(0xE0 | (cp >> 12));
+        buf[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        buf[2] = (char)(0x80 | (cp & 0x3F));
+        n = 3;
+    } else {
+        buf[0] = (char)(0xF0 | (cp >> 18));
+        buf[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+        buf[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        buf[3] = (char)(0x80 | (cp & 0x3F));
+        n = 4;
+    }
+    buf[n] = '\0';
+    return thrum_str(rt, buf, n);
+}
+
+static TVal tx_to_radix(TRuntime* rt, int64_t v, int base) {
+    if (v == 0) return thrum_cstr(rt, "0");
+    bool neg = v < 0;
+    uint64_t uv = neg ? (uint64_t)(-(v + 1)) + 1ULL : (uint64_t)v;
+    char tmp[72];
+    int pos = 71;
+    tmp[pos] = '\0';
+    const char* digs = "0123456789abcdef";
+    while (uv > 0) {
+        tmp[--pos] = digs[uv % (uint64_t)base];
+        uv /= (uint64_t)base;
+    }
+    if (neg) tmp[--pos] = '-';
+    return thrum_cstr(rt, tmp + pos);
+}
+
+static TVal tx_to_hex(TRuntime* rt, int argc, TVal* argv, int line, int col) {
+    (void)argc;
+    return tx_to_radix(rt, thrum_need_int(rt, argv[0], line, col), 16);
+}
+
+static TVal tx_to_bin(TRuntime* rt, int argc, TVal* argv, int line, int col) {
+    (void)argc;
+    return tx_to_radix(rt, thrum_need_int(rt, argv[0], line, col), 2);
+}
+
+static TVal tx_from_hex(TRuntime* rt, int argc, TVal* argv, int line, int col) {
+    (void)argc;
+    TStr* s = need_str(rt, argv[0], "text.from_hex", line, col);
+    const char* p = s->data;
+    while (*p && isspace((unsigned char)*p)) p++;
+    bool neg = false;
+    if (*p == '-') { neg = true; p++; }
+    else if (*p == '+') p++;
+    if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) p += 2;
+    const char* start = p;
+    uint64_t acc = 0;
+    while (*p && isxdigit((unsigned char)*p)) {
+        unsigned char c = (unsigned char)*p++;
+        uint64_t d = (c >= '0' && c <= '9') ? (uint64_t)(c - '0') :
+                     (c >= 'a' && c <= 'f') ? (uint64_t)(c - 'a' + 10) : (uint64_t)(c - 'A' + 10);
+        acc = (acc << 4) | d;
+    }
+    while (*p && isspace((unsigned char)*p)) p++;
+    if (p == start || *p != '\0') thrum_error(rt, line, col, "invalid hex integer", NULL);
+    return thrum_num_dimless(neg ? -(double)acc : (double)acc);
+}
+
 static TEnv* build_mod_text(TRuntime* rt) {
     TEnv* sc = thrum_env_new(rt, rt->builtins, false);
     mod_alias_builtin(rt, sc, "split", "split", 0, 0);
@@ -2072,6 +2202,11 @@ static TEnv* build_mod_text(TRuntime* rt) {
     mod_add(rt, sc, "text", "is_digit", tx_is_digit, 1, 1);
     mod_add(rt, sc, "text", "is_alpha", tx_is_alpha, 1, 1);
     mod_add(rt, sc, "text", "format", tx_format, 1, -1);
+    mod_add(rt, sc, "text", "ord", tx_ord, 1, 1);
+    mod_add(rt, sc, "text", "chr", tx_chr, 1, 1);
+    mod_add(rt, sc, "text", "to_hex", tx_to_hex, 1, 1);
+    mod_add(rt, sc, "text", "to_bin", tx_to_bin, 1, 1);
+    mod_add(rt, sc, "text", "from_hex", tx_from_hex, 1, 1);
     return sc;
 }
 

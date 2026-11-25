@@ -558,6 +558,25 @@ class Interp:
             raise ThrumError("expected a whole number, got %g" % q.v, site)
         return int(q.v)
 
+    def _matches_type(self, v, t):
+        if t is None:
+            return True
+        if t[0] == "kind":
+            if t[1] == "any":
+                return True
+            if t[1] == "record":
+                return isinstance(v, RecordVal)
+            return tname(v) == t[1]
+        if t[0] == "record":
+            return isinstance(v, RecordVal) and v.rtype.name == t[1]
+        if t[0] == "list_of":
+            return isinstance(v, list) and all(self._matches_type(x, t[1]) for x in v)
+        if t[0] == "map_of":
+            return isinstance(v, dict) and all(self._matches_type(k, t[1]) and self._matches_type(val, t[2]) for k, val in v.items())
+        if t[0] == "union":
+            return any(self._matches_type(v, alt) for alt in t[1])
+        return isinstance(v, Q) and v.d == t[1]
+
     def checktype(self, v, t, what, site):
         if t is None:
             return
@@ -572,6 +591,20 @@ class Interp:
                 raise ThrumError("%s should be %s, got %s" % (what, t[1], tname(v)), site)
         elif t[0] == "record":
             if not isinstance(v, RecordVal) or v.rtype.name != t[1]:
+                raise ThrumError("%s should be %s, got %s" % (what, t[2], tname(v)), site)
+        elif t[0] == "list_of":
+            if not isinstance(v, list):
+                raise ThrumError("%s should be %s, got %s" % (what, t[2], tname(v)), site)
+            for idx, item in enumerate(v):
+                self.checktype(item, t[1], "element %d of %s" % (idx, what), site)
+        elif t[0] == "map_of":
+            if not isinstance(v, dict):
+                raise ThrumError("%s should be %s, got %s" % (what, t[3], tname(v)), site)
+            for mk, mv in v.items():
+                self.checktype(mk, t[1], "key of %s" % what, site)
+                self.checktype(mv, t[2], "value of %s" % what, site)
+        elif t[0] == "union":
+            if not any(self._matches_type(v, alt) for alt in t[1]):
                 raise ThrumError("%s should be %s, got %s" % (what, t[2], tname(v)), site)
         else:
             if not isinstance(v, Q) or v.d != t[1]:

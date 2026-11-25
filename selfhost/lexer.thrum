@@ -21,7 +21,7 @@ pin OP1 = {
     "±": true, "+": true, "-": true, "*": true, "/": true, "^": true, "%": true,
     "<": true, ">": true, "=": true, "(": true, ")": true, "[": true, "]": true,
     r"{": true, "}": true, ",": true, ":": true, ".": true, "~": true, "\\": true,
-    ";": true,
+    ";": true, "|": true, "?": true,
 }
 pin OPEN_DELIM = {"(": true, "[": true, r"{": true}
 pin CLOSE_DELIM = {")": true, "]": true, "}": true}

@@ -1,0 +1,241 @@
+# Pure-Thrum sorting, searching, heap, set, and graph algorithms.
+
+# Binary search for exact target index in a sorted ascending list; returns nil if absent.
+fn bsearch(xs: list, target) -> num?:
+    var lo = 0
+    var hi = len(xs) - 1
+    while lo <= hi:
+        let mid = floor((lo + hi) / 2)
+        let mv = xs[mid]
+        if mv == target:
+            return mid
+        if mv < target:
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return nil
+
+# First index i where xs[i] >= target in a sorted list.
+fn lower_bound(xs: list, target) -> num:
+    var lo = 0
+    var hi = len(xs)
+    while lo < hi:
+        let mid = floor((lo + hi) / 2)
+        if xs[mid] < target:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+# First index i where xs[i] > target in a sorted list.
+fn upper_bound(xs: list, target) -> num:
+    var lo = 0
+    var hi = len(xs)
+    while lo < hi:
+        let mid = floor((lo + hi) / 2)
+        if xs[mid] <= target:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+# Merge two already-sorted lists using less_fn(a, b) -> bool (defaults to <).
+fn merge_sorted(a: list, b: list, less_fn: fn?) -> list:
+    var out = []
+    var i = 0
+    var j = 0
+    while i < len(a) and j < len(b):
+        var take_a = false
+        if less_fn == nil:
+            take_a = not (b[j] < a[i])
+        else:
+            take_a = not less_fn(b[j], a[i])
+        if take_a:
+            out = push(out, a[i])
+            i += 1
+        else:
+            out = push(out, b[j])
+            j += 1
+    while i < len(a):
+        out = push(out, a[i])
+        i += 1
+    while j < len(b):
+        out = push(out, b[j])
+        j += 1
+    return out
+
+# Stable bottom-up merge sort using optional less_fn(a, b) -> bool.
+fn msort_by(xs: list, less_fn: fn?) -> list:
+    let n = len(xs)
+    if n <= 1:
+        return xs
+    let mid = floor(n / 2)
+    return merge_sorted(msort_by(xs[:mid], less_fn), msort_by(xs[mid:], less_fn), less_fn)
+
+# Stable ascending merge sort.
+fn msort(xs: list) -> list:
+    return msort_by(xs, nil)
+
+# Frequency table map {item: count} for hashable items.
+fn freq(xs: list) -> map:
+    var counts = {}
+    for x in xs:
+        if x in counts:
+            counts[x] = counts[x] + 1
+        else:
+            counts[x] = 1
+    return counts
+
+# Union of two lists preserving order and uniqueness.
+fn set_union(a: list, b: list) -> list:
+    return uniq(concat(a, b))
+
+# Intersection of two lists preserving order from a.
+fn set_inter(a: list, b: list) -> list:
+    var bset = {}
+    for y in b:
+        bset[y] = true
+    var out = []
+    for x in uniq(a):
+        if x in bset:
+            out = push(out, x)
+    return out
+
+# Set difference a \ b preserving order from a.
+fn set_diff(a: list, b: list) -> list:
+    var bset = {}
+    for y in b:
+        bset[y] = true
+    var out = []
+    for x in uniq(a):
+        if not (x in bset):
+            out = push(out, x)
+    return out
+
+# Empty binary min-heap storing {prio, val} entries.
+fn heap_new() -> list:
+    return []
+
+# Push (prio, val) onto min-heap, returning updated heap.
+fn heap_push(h: list, prio: num, val) -> list:
+    var heap = push(h, {prio: prio, val: val})
+    var idx = len(heap) - 1
+    while idx > 0:
+        let par = floor((idx - 1) / 2)
+        if heap[idx].prio < heap[par].prio:
+            let tmp = heap[par]
+            heap[par] = heap[idx]
+            heap[idx] = tmp
+            idx = par
+        else:
+            break
+    return heap
+
+# Pop smallest entry from non-empty min-heap -> {prio, val, heap}.
+fn heap_pop(h: list) -> map:
+    requires len(h) > 0, "cannot pop empty heap"
+    let top = h[0]
+    let n = len(h)
+    if n == 1:
+        return {prio: top.prio, val: top.val, heap: []}
+    var heap = h[:n - 1]
+    heap[0] = h[n - 1]
+    let hn = len(heap)
+    var idx = 0
+    while true:
+        let l = 2 * idx + 1
+        let r = 2 * idx + 2
+        var best = idx
+        if l < hn and heap[l].prio < heap[best].prio:
+            best = l
+        if r < hn and heap[r].prio < heap[best].prio:
+            best = r
+        if best == idx:
+            break
+        let tmp = heap[idx]
+        heap[idx] = heap[best]
+        heap[best] = tmp
+        idx = best
+    return {prio: top.prio, val: top.val, heap: heap}
+
+# Breadth-first traversal order starting from node in adjacency map {node: [neighbors]}.
+fn bfs(adj: map, start: text) -> list[text]:
+    var seen = {}
+    seen[start] = true
+    var q = [start]
+    var head = 0
+    var order = []
+    while head < len(q):
+        let u = q[head]
+        head += 1
+        order = push(order, u)
+        let nbrs = adj[u] ?? []
+        for nb in nbrs:
+            if not (nb in seen):
+                seen[nb] = true
+                q = push(q, nb)
+    return order
+
+# Depth-first pre-order traversal from start in adjacency map {node: [neighbors]}.
+fn dfs(adj: map, start: text) -> list[text]:
+    var seen = {}
+    var order = []
+    fn visit(u: text):
+        if u in seen:
+            return
+        seen[u] = true
+        order = push(order, u)
+        let nbrs = adj[u] ?? []
+        for nb in nbrs:
+            visit(nb)
+    visit(start)
+    return order
+
+# Kahn's topological sort for directed acyclic graph {u: [v...]}; fails on cycle.
+fn topo_sort(adj: map) -> list[text]:
+    var indeg = {}
+    for u in keys(adj):
+        if not (u in indeg):
+            indeg[u] = 0
+        for v in adj[u]:
+            indeg[v] = (indeg[v] ?? 0) + 1
+    var q = []
+    for u in sort(keys(indeg)):
+        if indeg[u] == 0:
+            q = push(q, u)
+    var head = 0
+    var order = []
+    while head < len(q):
+        let u = q[head]
+        head += 1
+        order = push(order, u)
+        for v in (adj[u] ?? []):
+            indeg[v] = indeg[v] - 1
+            if indeg[v] == 0:
+                q = push(q, v)
+    if len(order) != len(keys(indeg)):
+        fail "cycle detected in topological sort"
+    return order
+
+# Dijkstra shortest paths on weighted adjacency map {u: [[v, weight], ...]}; returns {dist, prev}.
+fn dijkstra(adj: map, start: text) -> map:
+    var dist = {}
+    var prev = {}
+    dist[start] = 0
+    var pq = heap_push(heap_new(), 0, start)
+    while len(pq) > 0:
+        let popped = heap_pop(pq)
+        pq = popped.heap
+        let du = popped.prio
+        let u = popped.val
+        if (u in dist) and du > dist[u]:
+            continue
+        let edges = adj[u] ?? []
+        for e in edges:
+            let v = e[0]
+            let nd = du + e[1]
+            if not (v in dist) or nd < dist[v]:
+                dist[v] = nd
+                prev[v] = u
+                pq = heap_push(pq, nd, v)
+    return {dist: dist, prev: prev}

@@ -1,0 +1,30 @@
+fn total_dist(xs: list[m]) -> m:
+    return sum(xs)
+
+fn lookup_mass(m: map[text, kg], key: text) -> kg?:
+    if key in m:
+        return m[key]
+    return nil
+
+fn label_val(v: m | text) -> text:
+    return str(v)
+
+record PathBox:
+    pts: list[m]
+    tag: text? = nil
+
+with io:
+    io.say(total_dist([1 m, 200 cm]))
+    let inv = {a: 2 kg, b: 3 kg}
+    io.say(lookup_mass(inv, "a"), lookup_mass(inv, "z"))
+    io.say(label_val(5 m), label_val("ok"))
+    let bx = PathBox([1 m, 2 m])
+    io.say(len(bx.pts), bx.tag)
+    try:
+        io.say(total_dist([1 s]))
+    catch e:
+        io.say(e.message)
+    try:
+        io.say(label_val(1 kg))
+    catch e2:
+        io.say(e2.message)

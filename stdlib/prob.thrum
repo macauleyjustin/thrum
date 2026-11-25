@@ -1,0 +1,96 @@
+# Pure-Thrum probability distributions, error function, confidence intervals, and entropy.
+
+use math
+use stat
+
+# Gauss error function erf(x) using Abramowitz-Stegun 7.1.26 (max error ~1.5e-7).
+fn erf(x: 1) -> 1:
+    var ax = bare(x)
+    if ax == 0:
+        return 0
+    var sign_x = 1
+    if ax < 0:
+        sign_x = -1
+        ax = -ax
+    let t = 1 / (1 + 0.3275911 * ax)
+    let y = 1 - (((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t) * math.exp(-ax * ax)
+    return sign_x * y
+
+# Normal probability density function N(mu, sig) evaluated at x; supports consistent dimensional x/mu/sig.
+fn normal_pdf(x: num, mu: num, sig: num) -> num:
+    requires bare(sig) > 0, "standard deviation must be positive"
+    let z = (x - mu) / sig
+    return math.exp(-0.5 * z * z) / (sig * math.sqrt(2 * math.pi))
+
+# Normal cumulative distribution function P(X <= x) for N(mu, sig).
+fn normal_cdf(x: num, mu: num, sig: num) -> 1:
+    requires bare(sig) > 0, "standard deviation must be positive"
+    let z = (x - mu) / (sig * math.sqrt(2))
+    return 0.5 * (1 + erf(z))
+
+# Inverse standard normal CDF (quantile function) via Acklam's rational approximation.
+fn normal_inv_cdf(p: 1) -> 1:
+    requires p > 0 and p < 1, "probability must be in (0, 1)"
+    pin a1 = -3.969683028665376e1
+    pin a2 = 2.209460984245205e2
+    pin a3 = -2.759285104469687e2
+    pin a4 = 1.383577518672690e2
+    pin a5 = -3.066479806614716e1
+    pin a6 = 2.506628277459239e0
+    pin b1 = -5.447609879822406e1
+    pin b2 = 1.615858368580409e2
+    pin b3 = -1.556989798598866e2
+    pin b4 = 6.680131188771972e1
+    pin b5 = -1.328068155288572e1
+    pin c1 = -7.784894002430293e-3
+    pin c2 = -3.223964580411365e-1
+    pin c3 = -2.400758277161838e0
+    pin c4 = -2.549732539343734e0
+    pin c5 = 4.374664141464968e0
+    pin c6 = 2.938163982698783e0
+    pin d1 = 7.784695709041462e-3
+    pin d2 = 3.224671290700398e-1
+    pin d3 = 2.445134137142996e0
+    pin d4 = 3.754408661907416e0
+
+    let plow = 0.02425
+    let phigh = 1 - plow
+    if p < plow:
+        let q = math.sqrt(-2 * math.ln(p))
+        return (((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) / ((((d1 * q + d2) * q + d3) * q + d4) * q + 1)
+    if phigh < p:
+        let q = math.sqrt(-2 * math.ln(1 - p))
+        return -(((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) / ((((d1 * q + d2) * q + d3) * q + d4) * q + 1)
+    let q = p - 0.5
+    let r = q * q
+    return (((((a1 * r + a2) * r + a3) * r + a4) * r + a5) * r + a6) * q / (((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1)
+
+# Binomial probability mass function P(X = k) for n trials and success probability p.
+fn binomial_pmf(k: 1, n: 1, p: 1) -> 1:
+    requires k >= 0 and k <= n and p >= 0 and p <= 1, "invalid binomial parameters"
+    return math.comb(n, k) * (p ^ k) * ((1 - p) ^ (n - k))
+
+# Poisson probability mass function P(X = k) with mean rate lam >= 0.
+fn poisson_pmf(k: 1, lam: 1) -> 1:
+    requires k >= 0 and lam >= 0, "invalid poisson parameters"
+    if lam == 0:
+        if k == 0:
+            return 1
+        return 0
+    return (lam ^ k) * math.exp(-lam) / math.factorial(k)
+
+# Two-sided z confidence interval {mean, half, low, high} preserving measurement units.
+fn confidence_interval(xs: list, z: 1 = 1.959963984540054) -> map:
+    requires len(xs) >= 2, "confidence_interval needs >= 2 observations"
+    let m = mean(xs)
+    let se = stdev(xs) / math.sqrt(len(xs))
+    let h = se * z
+    return {mean: m, half: h, low: m - h, high: m + h}
+
+# Shannon entropy H = -sum(p * log2(p)) in bits for a probability distribution list.
+fn shannon_entropy(probs: list[1]) -> 1:
+    var h = 0
+    for p in probs:
+        if p > 0:
+            h -= p * math.log2(p)
+    return h

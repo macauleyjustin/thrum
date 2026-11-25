@@ -1,0 +1,3 @@
+fn sum_m(xs: list[m]) -> m:
+    return sum(xs)
+let bad = sum_m([1 s, 2 s])

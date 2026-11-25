@@ -110,14 +110,20 @@ typedef enum {
     ANN_NONE = 0,
     ANN_KIND,
     ANN_DIM,
-    ANN_RECORD
+    ANN_RECORD,
+    ANN_LIST,
+    ANN_MAP,
+    ANN_UNION
 } TAnnKind;
 
-typedef struct {
+typedef struct TTypeAnn TTypeAnn;
+struct TTypeAnn {
     TAnnKind kind;
-    const char* name; /* kind name, unit sym, or record name */
+    const char* name; /* kind name, unit sym, record name, or formatted spec */
     TDim dim;
-} TTypeAnn;
+    int nsubs;
+    const TTypeAnn* subs;
+};
 
 typedef TVal (*TExprFn)(TRuntime* rt, TEnv* env);
 typedef TVal (*TFnPtr)(TRuntime* rt, TEnv* env, int argc, TVal* argv);
@@ -318,6 +324,8 @@ struct TRuntime {
     char** intern_strs;
     int n_intern;
     int cap_intern;
+    uint32_t* intern_buckets;
+    size_t intern_bcap;
 
     /* Scopes & modules */
     TEnv* builtins;
@@ -496,6 +504,8 @@ void thrum_drain(TRuntime* rt);
 void thrum_why(TRuntime* rt, TEnv* env, const char* name, int line, int col);
 void thrum_budget(TRuntime* rt, TEnv* env, const char* name, int line, int col);
 void thrum_whatif(TRuntime* rt, TEnv* env, int npairs, const char** names, TVal* vals, TExprFn body, int line, int col);
+void thrum_export_graph(TRuntime* rt, TEnv* env, const char* target_name, const char* fmt);
+void thrum_dump_vars(TRuntime* rt, TEnv* env);
 
 /* ---- Capabilities, Modules, Journal, JSON ---- */
 TVal thrum_make_builtin(TRuntime* rt, const char* name, TBuiltinPtr fn, int min_arity, int max_arity);

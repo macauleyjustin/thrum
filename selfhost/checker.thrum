@@ -60,9 +60,34 @@ fn ty_fn(params, ret):
 fn ty_mod(name, exports):
     return {tk: "module", name: name, exports: exports}
 
+fn ty_list(elem):
+    return {tk: "list", elem: elem}
+
+fn ty_map(k, v):
+    return {tk: "map", k: k, v: v}
+
+fn ty_union(alts, label):
+    return {tk: "union", alts: alts, label: label}
+
+fn is_list_ty(t) -> bool:
+    return t.tk == "list" or (t.tk == "kind" and t.kind == "list")
+
+fn is_map_ty(t) -> bool:
+    return t.tk == "map" or (t.tk == "kind" and t.kind == "map")
+
 fn ty_matches(actual, expected):
     if actual.tk == "any" or expected.tk == "any":
         return true
+    if actual.tk == "union":
+        for a in actual.alts:
+            if not ty_matches(a, expected):
+                return false
+        return true
+    if expected.tk == "union":
+        for alt in expected.alts:
+            if ty_matches(actual, alt):
+                return true
+        return false
     if expected.tk == "num":
         if actual.tk != "num":
             return false
@@ -71,7 +96,19 @@ fn ty_matches(actual, expected):
         return true
     if expected.tk == "record":
         return actual.tk == "record" and actual.name == expected.name
+    if expected.tk == "list":
+        if actual.tk == "kind" and actual.kind == "list":
+            return true
+        return actual.tk == "list" and ty_matches(actual.elem, expected.elem)
+    if expected.tk == "map":
+        if actual.tk == "kind" and actual.kind == "map":
+            return true
+        return actual.tk == "map" and ty_matches(actual.k, expected.k) and ty_matches(actual.v, expected.v)
     if expected.tk == "kind":
+        if expected.kind == "list" and actual.tk == "list":
+            return true
+        if expected.kind == "map" and actual.tk == "map":
+            return true
         if expected.kind == "fn":
             return actual.tk == "fn" or (actual.tk == "kind" and actual.kind == "fn")
         return actual.tk == "kind" and actual.kind == expected.kind
@@ -89,6 +126,16 @@ fn ty_label(ty):
         return ty.kind
     if ty.tk == "record":
         return ty.name
+    if ty.tk == "list":
+        if ty.elem.tk == "any":
+            return "list"
+        return "list[" + ty_label(ty.elem) + "]"
+    if ty.tk == "map":
+        if ty.k.tk == "any" and ty.v.tk == "any":
+            return "map"
+        return "map[" + ty_label(ty.k) + ", " + ty_label(ty.v) + "]"
+    if ty.tk == "union":
+        return ty.label
     if ty.tk == "fn":
         return "fn"
     if ty.tk == "module":
@@ -108,6 +155,12 @@ fn stdmod_exports(name):
             isfinite: ty_fn([{name: "x", ty: TY_NUM_ANY, hd: false}], TY_BOOL),
             isnan: ty_fn([{name: "x", ty: TY_NUM_ANY, hd: false}], TY_BOOL),
             isinf: ty_fn([{name: "x", ty: TY_NUM_ANY, hd: false}], TY_BOOL),
+            band: ty_fn([{name: "a", ty: TY_DIMLESS, hd: false}, {name: "b", ty: TY_DIMLESS, hd: false}], TY_DIMLESS),
+            bor: ty_fn([{name: "a", ty: TY_DIMLESS, hd: false}, {name: "b", ty: TY_DIMLESS, hd: false}], TY_DIMLESS),
+            bxor: ty_fn([{name: "a", ty: TY_DIMLESS, hd: false}, {name: "b", ty: TY_DIMLESS, hd: false}], TY_DIMLESS),
+            bnot: ty_fn([{name: "a", ty: TY_DIMLESS, hd: false}], TY_DIMLESS),
+            shl: ty_fn([{name: "a", ty: TY_DIMLESS, hd: false}, {name: "k", ty: TY_DIMLESS, hd: false}], TY_DIMLESS),
+            shr: ty_fn([{name: "a", ty: TY_DIMLESS, hd: false}, {name: "k", ty: TY_DIMLESS, hd: false}], TY_DIMLESS),
         }
         let unary_math = ["sin", "cos", "tan", "asin", "acos", "atan", "exp", "expm1", "ln", "log1p", "log10", "log2", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh"]
         for fnm in unary_math:
@@ -294,6 +347,15 @@ fn check_program(entry_src, entry_path, stdlib_dir, fs_cap, disp_path = nil, loa
                 return ty_kind(ann.name)
             if ann.kind == "dim":
                 return ty_num(ann.dim)
+            if ann.kind == "list_of":
+                return ty_list(ty_from_ann(ann.elem, sid, site))
+            if ann.kind == "map_of":
+                return ty_map(ty_from_ann(ann.k, sid, site), ty_from_ann(ann.v, sid, site))
+            if ann.kind == "union":
+                var alts = []
+                for a in ann.alts:
+                    alts = push(alts, ty_from_ann(a, sid, site))
+                return ty_union(alts, ann.disp)
             if ann.kind == "record":
                 if contains_dot(ann.full):
                     let pts = split(ann.full, ".")
@@ -409,9 +471,15 @@ fn check_program(entry_src, entry_path, stdlib_dir, fs_cap, disp_path = nil, loa
                     if lt.dim != nil:
                         return {ty: ty_num(lt.dim), def_items: di}
                     return {ty: ty_num(rt.dim), def_items: di}
-                if op == "+" and lt.tk == "kind" and rt.tk == "kind" and lt.kind == rt.kind and (lt.kind == "text" or lt.kind == "list" or lt.kind == "map"):
+                if op == "+" and ((lt.tk == "kind" and rt.tk == "kind" and lt.kind == "text" and rt.kind == "text") or (is_list_ty(lt) and is_list_ty(rt)) or (is_map_ty(lt) and is_map_ty(rt))):
+                    if ty_matches(lt, rt) and ty_matches(rt, lt):
+                        return {ty: lt, def_items: di}
+                    if is_list_ty(lt):
+                        return {ty: TY_LIST, def_items: di}
+                    if is_map_ty(lt):
+                        return {ty: TY_MAP, def_items: di}
                     return {ty: lt, def_items: di}
-                if lt.tk != "any" and rt.tk != "any" and lt.tk != rt.tk:
+                if lt.tk != "any" and rt.tk != "any" and lt.tk != "union" and rt.tk != "union" and not ty_matches(lt, rt) and not ty_matches(rt, lt):
                     var act = "subtract"
                     if op == "+":
                         act = "add"
@@ -473,17 +541,35 @@ fn check_program(entry_src, entry_path, stdlib_dir, fs_cap, disp_path = nil, loa
                         di = r.def_items
                 return {ty: TY_TEXT, def_items: di}
             if k == "list":
-                for x in n.items:
-                    let r = check_expr(x, sid, di)
-                    di = r.def_items
-                return {ty: TY_LIST, def_items: di}
+                var et = TY_ANY
+                if len(n.items) > 0:
+                    let r0 = check_expr(n.items[0], sid, di)
+                    et = r0.ty
+                    di = r0.def_items
+                    for idx_i in 1..<len(n.items):
+                        let r = check_expr(n.items[idx_i], sid, di)
+                        di = r.def_items
+                        if not (ty_matches(r.ty, et) and ty_matches(et, r.ty)):
+                            et = TY_ANY
+                return {ty: ty_list(et), def_items: di}
             if k == "map":
-                for en in n.entries:
-                    let r1 = check_expr(en.k, sid, di)
-                    di = r1.def_items
-                    let r2 = check_expr(en.v, sid, di)
-                    di = r2.def_items
-                return {ty: TY_MAP, def_items: di}
+                var kt = TY_ANY
+                var vt = TY_ANY
+                if len(n.entries) > 0:
+                    let r10 = check_expr(n.entries[0].k, sid, di)
+                    kt = r10.ty
+                    let r20 = check_expr(n.entries[0].v, sid, r10.def_items)
+                    vt = r20.ty
+                    di = r20.def_items
+                    for idx_e in 1..<len(n.entries):
+                        let r1 = check_expr(n.entries[idx_e].k, sid, di)
+                        let r2 = check_expr(n.entries[idx_e].v, sid, r1.def_items)
+                        di = r2.def_items
+                        if not (ty_matches(r1.ty, kt) and ty_matches(kt, r1.ty)):
+                            kt = TY_ANY
+                        if not (ty_matches(r2.ty, vt) and ty_matches(vt, r2.ty)):
+                            vt = TY_ANY
+                return {ty: ty_map(kt, vt), def_items: di}
             if k == "bin":
                 return check_bin(n, sid, di)
             if k == "un":
@@ -606,6 +692,10 @@ fn check_program(entry_src, entry_path, stdlib_dir, fs_cap, disp_path = nil, loa
             if k == "index":
                 let r1 = check_expr(n.obj, sid, di)
                 let r2 = check_expr(n.idx, sid, r1.def_items)
+                if r1.ty.tk == "list":
+                    return {ty: r1.ty.elem, def_items: r2.def_items}
+                if r1.ty.tk == "map":
+                    return {ty: r1.ty.v, def_items: r2.def_items}
                 return {ty: TY_ANY, def_items: r2.def_items}
             if k == "slice":
                 let ro = check_expr(n.obj, sid, di)
@@ -619,7 +709,7 @@ fn check_program(entry_src, entry_path, stdlib_dir, fs_cap, disp_path = nil, loa
                 if n.step != nil:
                     let rt = check_expr(n.step, sid, di)
                     di = rt.def_items
-                if ro.ty.tk == "kind" and (ro.ty.kind == "list" or ro.ty.kind == "text"):
+                if is_list_ty(ro.ty) or (ro.ty.tk == "kind" and ro.ty.kind == "text"):
                     return {ty: ro.ty, def_items: di}
                 return {ty: TY_ANY, def_items: di}
             if k == "dot":
@@ -734,11 +824,27 @@ fn check_program(entry_src, entry_path, stdlib_dir, fs_cap, disp_path = nil, loa
                     check_block(n.els, sid, expected_ret, fn_name)
                 return di
             if k == "for":
-                di = check_expr(n.iter, sid, di).def_items
+                let rit = check_expr(n.iter, sid, di)
+                di = rit.def_items
+                let it_ty = rit.ty
                 let sub = sc_new(sid, false)
-                sc_set_sym(sub, n.a, "local", TY_ANY)
                 if n.b != nil:
-                    sc_set_sym(sub, n.b, "local", TY_ANY)
+                    if it_ty.tk == "list":
+                        sc_set_sym(sub, n.a, "local", TY_DIMLESS)
+                        sc_set_sym(sub, n.b, "local", it_ty.elem)
+                    elif it_ty.tk == "map":
+                        sc_set_sym(sub, n.a, "local", it_ty.k)
+                        sc_set_sym(sub, n.b, "local", it_ty.v)
+                    else:
+                        sc_set_sym(sub, n.a, "local", TY_ANY)
+                        sc_set_sym(sub, n.b, "local", TY_ANY)
+                else:
+                    var el_ty = TY_ANY
+                    if it_ty.tk == "list":
+                        el_ty = it_ty.elem
+                    elif it_ty.tk == "map":
+                        el_ty = it_ty.k
+                    sc_set_sym(sub, n.a, "local", el_ty)
                 check_block(n.body, sub, expected_ret, fn_name)
                 return di
             if k == "while":

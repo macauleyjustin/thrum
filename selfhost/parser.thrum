@@ -124,9 +124,34 @@ fn _parse_tokens(toks, info, want_expr = false):
             parts = u.buf_push(parts, {t: "str", v: u.str_buf_join(buf)})
         return u.buf_list(parts)
 
-    fn typeann():
+    fn ann_disp(a) -> text:
+        if a.kind == "kind":
+            return a.name
+        if a.kind == "dim":
+            return a.sym
+        if a.kind == "record":
+            return a.full
+        if a.kind == "list_of" or a.kind == "map_of" or a.kind == "union":
+            return a.disp
+        return "any"
+
+    fn type_base():
         let t = peek()
-        if t.kind == "NAME" and t.val in KINDS:
+        if t.kind == "NAME" and (t.val == "list" or t.val == "map"):
+            let nm = take().val
+            if op("["):
+                take()
+                if nm == "list":
+                    let el = typeann()
+                    take("OP", "]")
+                    return {kind: "list_of", elem: el, disp: "list[" + ann_disp(el) + "]"}
+                let kt = typeann()
+                take("OP", ",")
+                let vt = typeann()
+                take("OP", "]")
+                return {kind: "map_of", k: kt, v: vt, disp: "map[" + ann_disp(kt) + ", " + ann_disp(vt) + "]"}
+            return {kind: "kind", name: nm}
+        if (t.kind == "NAME" and t.val in KINDS) or (t.kind == "KW" and t.val == "fn"):
             take()
             return {kind: "kind", name: t.val}
         if t.kind == "KW" and t.val == "nil":
@@ -144,6 +169,35 @@ fn _parse_tokens(toks, info, want_expr = false):
                 pts = push(pts, take("NAME").val)
             return {kind: "record", short: pts[len(pts) - 1], full: join(".", pts)}
         u.diag_err(info, u.site_of(t), "expected a type or unit here")
+
+    fn type_atom():
+        let ty = type_base()
+        if op("?"):
+            take()
+            return {kind: "union", alts: [ty, {kind: "kind", name: "nil"}], disp: ann_disp(ty) + "?"}
+        return ty
+
+    fn typeann():
+        let first = type_atom()
+        if not op("|"):
+            return first
+        var alts = []
+        if first.kind == "union":
+            for a in first.alts:
+                alts = push(alts, a)
+        else:
+            alts = push(alts, first)
+        var labels = [ann_disp(first)]
+        while op("|"):
+            take()
+            let nxt = type_atom()
+            labels = push(labels, ann_disp(nxt))
+            if nxt.kind == "union":
+                for a in nxt.alts:
+                    alts = push(alts, a)
+            else:
+                alts = push(alts, nxt)
+        return {kind: "union", alts: alts, disp: join(" | ", labels)}
 
     fn take_unit():
         let t = peek()

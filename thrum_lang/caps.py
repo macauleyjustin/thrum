@@ -141,6 +141,7 @@ def cap_io(I, args, site):
             "say": (None, say),
             "print": (None, prt),
             "ask": ((0, 1), ask),
+            "eof": ((0, 0), lambda I, a, s: False),
             "warn": (None, warn),
             "err": (None, err),
             "table": ((1, 2), table),

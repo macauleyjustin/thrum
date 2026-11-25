@@ -1,0 +1,7 @@
+use math
+use text
+
+with io:
+    io.say(math.band(0b1100, 0b1010), math.bor(0b1100, 0b1010), math.bxor(0b1100, 0b1010))
+    io.say(math.bnot(0), math.shl(3, 4), math.shr(48, 3), math.shr(-5, 1))
+    io.say(text.ord("A"), text.ord("π"), text.chr(960), text.to_hex(255), text.to_bin(42), text.from_hex("0xff"))

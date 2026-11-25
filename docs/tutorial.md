@@ -34,13 +34,13 @@ Verify a script statically, run it, or compile it into a standalone executable:
 ```bash
 ./thrumc check examples/bmi.thrum
 ./thrumc run examples/bmi.thrum
-./thrumc build examples/solitaire.thrum -o solitaire
+./thrumc build examples/tetris.thrum -o tetris
 ```
 
-For quick experimentation interactively, you can also start the Python reference REPL:
+For interactive exploration, launch the native compiler REPL (or Python reference REPL):
 
 ```bash
-python3 thrum.py repl
+./thrumc repl
 ```
 
 ---
@@ -314,7 +314,7 @@ with gui:
         gui.wait(16)
 ```
 
-See [examples/solitaire.thrum](../examples/solitaire.thrum) for a complete 1,069-line interactive GUI card game using drag-and-drop, hit-testing, double-click auto-moves, undo history, and confetti animations.
+Run `THRUM_HOME=. ./thrumc build my_gui.thrum -o my_gui && ./my_gui` on macOS to open a live Cocoa desktop window directly from native code.
 
 ---
 

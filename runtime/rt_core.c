@@ -174,19 +174,49 @@ void thrum_pop_roots(TRuntime* rt, int target_top) {
     rt->root_top = target_top;
 }
 
+static uint64_t fnv1a_hash(const char* s, size_t len) {
+    uint64_t h = 14695981039346656037ULL;
+    for (size_t i = 0; i < len; i++) {
+        h ^= (unsigned char)s[i];
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
 const char* thrum_intern(TRuntime* rt, const char* s) {
     if (!rt || !s) return s;
-    for (int i = 0; i < rt->n_intern; i++) {
-        if (strcmp(rt->intern_strs[i], s) == 0) return rt->intern_strs[i];
+    size_t slen = strlen(s);
+    uint64_t h = fnv1a_hash(s, slen);
+    if (rt->intern_bcap == 0 || (size_t)(rt->n_intern + 1) * 2 > rt->intern_bcap) {
+        size_t nbcap = rt->intern_bcap ? rt->intern_bcap * 2 : 512;
+        uint32_t* nb = (uint32_t*)calloc(nbcap, sizeof(uint32_t));
+        size_t mask = nbcap - 1;
+        for (int i = 0; i < rt->n_intern; i++) {
+            const char* ex = rt->intern_strs[i];
+            size_t slot = (size_t)fnv1a_hash(ex, strlen(ex)) & mask;
+            while (nb[slot] != 0) slot = (slot + 1) & mask;
+            nb[slot] = (uint32_t)(i + 1);
+        }
+        free(rt->intern_buckets);
+        rt->intern_buckets = nb;
+        rt->intern_bcap = nbcap;
+    }
+    size_t mask = rt->intern_bcap - 1;
+    size_t slot = (size_t)h & mask;
+    while (rt->intern_buckets[slot] != 0) {
+        int idx = (int)rt->intern_buckets[slot] - 1;
+        if (strcmp(rt->intern_strs[idx], s) == 0) return rt->intern_strs[idx];
+        slot = (slot + 1) & mask;
     }
     if (rt->n_intern >= rt->cap_intern) {
         rt->cap_intern = rt->cap_intern ? rt->cap_intern * 2 : 256;
         rt->intern_strs = (char**)realloc(rt->intern_strs, (size_t)rt->cap_intern * sizeof(char*));
     }
-    size_t n = strlen(s);
-    char* copy = (char*)malloc(n + 1);
-    memcpy(copy, s, n + 1);
-    rt->intern_strs[rt->n_intern++] = copy;
+    char* copy = (char*)malloc(slen + 1);
+    memcpy(copy, s, slen + 1);
+    int nidx = rt->n_intern++;
+    rt->intern_strs[nidx] = copy;
+    rt->intern_buckets[slot] = (uint32_t)(nidx + 1);
     return copy;
 }
 
@@ -748,6 +778,52 @@ TVal thrum_range_op(TRuntime* rt, TVal va, TVal vb, bool excl, int line, int col
 }
 
 /* ============================== Records, Indexing, Slicing, Types ============================== */
+static bool val_matches_type(TVal v, TTypeAnn t) {
+    if (t.kind == ANN_NONE) return true;
+    if (t.kind == ANN_KIND) {
+        if (strcmp(t.name, "any") == 0) return true;
+        if (strcmp(t.name, "record") == 0) return v.kind == TV_OBJ && v.as.obj->kind == OBJ_RECVAL;
+        return strcmp(thrum_tname(v), t.name) == 0;
+    }
+    if (t.kind == ANN_RECORD) {
+        return v.kind == TV_OBJ && v.as.obj->kind == OBJ_RECVAL &&
+               strcmp(((TRecVal*)v.as.obj)->rtype->name, t.name) == 0;
+    }
+    if (t.kind == ANN_DIM) {
+        return v.kind == TV_NUM && thrum_dim_eq(v.as.q.d, t.dim);
+    }
+    if (t.kind == ANN_LIST) {
+        if (v.kind != TV_OBJ || v.as.obj->kind != OBJ_LIST) return false;
+        if (t.nsubs >= 1 && t.subs) {
+            TList* l = (TList*)v.as.obj;
+            for (size_t i = 0; i < l->len; i++) {
+                if (!val_matches_type(l->items[i], t.subs[0])) return false;
+            }
+        }
+        return true;
+    }
+    if (t.kind == ANN_MAP) {
+        if (v.kind != TV_OBJ || v.as.obj->kind != OBJ_MAP) return false;
+        if (t.nsubs >= 2 && t.subs) {
+            TMap* m = (TMap*)v.as.obj;
+            for (size_t i = 0; i < m->order_len; i++) {
+                TVal k = m->order_keys[i], mv;
+                if (thrum_map_get(m, k, &mv)) {
+                    if (!val_matches_type(k, t.subs[0]) || !val_matches_type(mv, t.subs[1])) return false;
+                }
+            }
+        }
+        return true;
+    }
+    if (t.kind == ANN_UNION) {
+        for (int i = 0; i < t.nsubs; i++) {
+            if (val_matches_type(v, t.subs[i])) return true;
+        }
+        return false;
+    }
+    return true;
+}
+
 void thrum_check_type(TRuntime* rt, TVal v, TTypeAnn t, const char* what, int line, int col) {
     if (t.kind == ANN_NONE) return;
     if (t.kind == ANN_KIND) {
@@ -785,6 +861,51 @@ void thrum_check_type(TRuntime* rt, TVal v, TTypeAnn t, const char* what, int li
                 snprintf(got, sizeof(got), "%s", thrum_tname(v));
             }
             snprintf(msg, sizeof(msg), "%s should have dimension %s, got %s", what, t.name, got);
+            thrum_error(rt, line, col, msg, NULL);
+        }
+        return;
+    }
+    if (t.kind == ANN_LIST) {
+        if (v.kind != TV_OBJ || v.as.obj->kind != OBJ_LIST) {
+            char msg[160];
+            snprintf(msg, sizeof(msg), "%s should be %s, got %s", what, t.name ? t.name : "list", thrum_tname(v));
+            thrum_error(rt, line, col, msg, NULL);
+        }
+        if (t.nsubs >= 1 && t.subs) {
+            TList* l = (TList*)v.as.obj;
+            for (size_t i = 0; i < l->len; i++) {
+                char item_what[192];
+                snprintf(item_what, sizeof(item_what), "element %zu of %s", i, what);
+                thrum_check_type(rt, l->items[i], t.subs[0], item_what, line, col);
+            }
+        }
+        return;
+    }
+    if (t.kind == ANN_MAP) {
+        if (v.kind != TV_OBJ || v.as.obj->kind != OBJ_MAP) {
+            char msg[160];
+            snprintf(msg, sizeof(msg), "%s should be %s, got %s", what, t.name ? t.name : "map", thrum_tname(v));
+            thrum_error(rt, line, col, msg, NULL);
+        }
+        if (t.nsubs >= 2 && t.subs) {
+            TMap* m = (TMap*)v.as.obj;
+            for (size_t i = 0; i < m->order_len; i++) {
+                TVal k = m->order_keys[i], mv;
+                if (thrum_map_get(m, k, &mv)) {
+                    char kw[192], vw[192];
+                    snprintf(kw, sizeof(kw), "key of %s", what);
+                    snprintf(vw, sizeof(vw), "value of %s", what);
+                    thrum_check_type(rt, k, t.subs[0], kw, line, col);
+                    thrum_check_type(rt, mv, t.subs[1], vw, line, col);
+                }
+            }
+        }
+        return;
+    }
+    if (t.kind == ANN_UNION) {
+        if (!val_matches_type(v, t)) {
+            char msg[192];
+            snprintf(msg, sizeof(msg), "%s should be %s, got %s", what, t.name ? t.name : "union", thrum_tname(v));
             thrum_error(rt, line, col, msg, NULL);
         }
     }

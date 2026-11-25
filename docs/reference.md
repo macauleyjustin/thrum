@@ -94,6 +94,13 @@ record Force:
 - Reading non-existent fields or assigning incompatible types/dimensions (`f.val = 1 s`) raises an error.
 - Field update (`var f = Force(5 N); f.val = 10 N`) performs a Copy-on-Write rebuild and notifies dependent reactive cells.
 
+### 3.5 Compound Containers & Union/Optional Annotations
+
+Parameter, return, and record-field annotations also support typed collections and unions enforced statically by `thrumc check` / `--strict` and dynamically at call/construction boundaries:
+
+- **Typed Lists & Maps:** `list[m]`, `list[Pt2]`, `map[text, kg]` check element/key/value types recursively.
+- **Unions & Optionals:** `m | text`, `num | nil`, and shorthand `T?` (`kg?` is `kg | nil`).
+
 ---
 
 ## 4. Execution Model and Reactivity

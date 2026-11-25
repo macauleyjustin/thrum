@@ -42,7 +42,11 @@ field_decl  = NAME [ ":" type_ann ] [ "=" expr ] ;
 fndecl      = "fn" NAME "(" [ params ] ")" [ "->" type_ann ] ":" block ;
 params      = param { "," param } ;
 param       = NAME [ ":" type_ann ] [ "=" expr ] ;
-type_ann    = KIND_NAME | "nil" | UNIT_EXPR | NAME { "." NAME } ;
+type_ann    = type_atom { "|" type_atom } ;
+type_atom   = type_base [ "?" ] ;
+type_base   = "list" "[" type_ann "]"
+            | "map" "[" type_ann "," type_ann "]"
+            | KIND_NAME | "nil" | UNIT_EXPR | NAME { "." NAME } ;
 
 if_stmt     = "if" expr ":" block { "elif" expr ":" block } [ "else" ":" block ] ;
 for_stmt    = "for" NAME [ "," NAME ] "in" expr ":" block ;

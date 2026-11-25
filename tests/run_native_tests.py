@@ -28,9 +28,6 @@ def run_case(thrum_file):
             parts = fh.read().strip().split()
         mode, extra = parts[0], parts[1:]
 
-    if mode in ("graph", "ast"):
-        return None, "cli-only"
-
     if mode == "replay_ok":
         with tempfile.TemporaryDirectory() as tmp:
             jpath = os.path.join(tmp, "j.json")
@@ -79,7 +76,9 @@ def run_case(thrum_file):
                     return False, f"rc={p.returncode} exp={exp!r} got={norm(p.stdout)!r} err={p.stderr!r}"
         return True, ""
 
-    if mode == "doc":
+    if mode in ("graph", "ast"):
+        argv = [THRUMC, mode, os.path.basename(thrum_file)] + extra
+    elif mode == "doc":
         argv = [THRUMC, "doc"] + extra
     else:
         argv = [THRUMC, mode, os.path.basename(thrum_file)] + extra
@@ -120,10 +119,9 @@ def main():
 
     print(f"Native conformance: {passed}/{passed + failed} passed ({skipped} cli-only skipped)")
 
-    # Native self-tests + stdlib + browser engine + headless GUI smoke checks
+    # Native self-tests + stdlib + headless GUI capability smoke test
     r_self = subprocess.run([THRUMC, "test"], capture_output=True, text=True, cwd=ROOT, env=ENV)
     r_std = subprocess.run([THRUMC, "test", "tests/stdlib_test.thrum"], capture_output=True, text=True, cwd=ROOT, env=ENV)
-    r_br_unit = subprocess.run([THRUMC, "test", "tests/browser_test.thrum"], capture_output=True, text=True, cwd=ROOT, env=ENV)
     if r_self.returncode != 0:
         print("FAIL ./thrumc test:\n" + r_self.stdout + r_self.stderr)
         failed += 1
@@ -134,44 +132,34 @@ def main():
         failed += 1
     else:
         print("Native stdlib suite: passed")
-    if r_br_unit.returncode != 0:
-        print("FAIL ./thrumc test tests/browser_test.thrum:\n" + r_br_unit.stdout + r_br_unit.stderr)
-        failed += 1
-    else:
-        print("Native browser engine suite: 5/5 passed")
 
-    sol_bin = os.path.join(ROOT, "solitaire")
-    br_bin = os.path.join(ROOT, "browser")
-    if os.path.isfile(sol_bin) and sys.platform == "darwin":
+    if sys.platform == "darwin":
         with tempfile.TemporaryDirectory() as tmp:
             shot = os.path.join(tmp, "gui.png")
-            r_gui = subprocess.run(
-                [sol_bin, "--draw3", "--demo", "12", "--screenshot", shot],
-                capture_output=True, text=True, cwd=ROOT,
-                env={**ENV, "THRUM_GUI_HEADLESS": "1"},
-            )
+            gui_src = os.path.join(tmp, "gui_smoke.thrum")
+            gui_bin = os.path.join(tmp, "gui_smoke")
+            with open(gui_src, "w", encoding="utf-8") as fh:
+                fh.write(
+                    'with gui, args:\n'
+                    '    gui.open("Smoke", 320, 200)\n'
+                    '    gui.begin()\n'
+                    '    gui.clear(20, 30, 40)\n'
+                    '    gui.clip(10, 10, 300, 180)\n'
+                    '    gui.rect(20, 20, 100, 40, 80, 180, 120)\n'
+                    '    gui.text(30, 35, "Thrum", 16, 255, 255, 255, "left", true, 255, false)\n'
+                    '    gui.unclip()\n'
+                    '    gui.commit()\n'
+                    '    gui.screenshot(args.get(0))\n'
+                    '    gui.close()\n'
+                )
+            r_b = subprocess.run([THRUMC, "build", gui_src, "-o", gui_bin], capture_output=True, text=True, cwd=ROOT, env=ENV)
+            r_g = subprocess.run([gui_bin, shot], capture_output=True, text=True, cwd=ROOT, env={**ENV, "THRUM_GUI_HEADLESS": "1"}) if r_b.returncode == 0 else r_b
             hdr = open(shot, "rb").read(8) if os.path.exists(shot) else b""
-            if r_gui.returncode != 0 or hdr != b"\x89PNG\r\n\x1a\n":
-                print("FAIL solitaire headless GUI:", r_gui.returncode, r_gui.stderr)
+            if r_g.returncode != 0 or hdr != b"\x89PNG\r\n\x1a\n":
+                print("FAIL headless GUI capability test:", r_g.returncode, r_g.stderr)
                 failed += 1
             else:
-                print("Native headless Solitaire GUI smoke test: passed")
-
-    if os.path.isfile(br_bin) and sys.platform == "darwin":
-        with tempfile.TemporaryDirectory() as tmp:
-            for idx, target_url in enumerate(["about:home", "about:thrum", "file://README.md"]):
-                shot = os.path.join(tmp, f"br_{idx}.png")
-                r_br = subprocess.run(
-                    [br_bin, "--url", target_url, "--screenshot", shot],
-                    capture_output=True, text=True, cwd=ROOT,
-                    env={**ENV, "THRUM_GUI_HEADLESS": "1"},
-                )
-                hdr = open(shot, "rb").read(8) if os.path.exists(shot) else b""
-                if r_br.returncode != 0 or hdr != b"\x89PNG\r\n\x1a\n":
-                    print(f"FAIL browser headless GUI ({target_url}):", r_br.returncode, r_br.stderr)
-                    failed += 1
-            else:
-                print("Native headless Web Browser GUI smoke tests: passed")
+                print("Native headless GUI capability smoke test: passed")
 
     return 0 if failed == 0 else 1
 

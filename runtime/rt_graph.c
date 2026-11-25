@@ -1226,3 +1226,116 @@ TVal thrum_get_module(TRuntime* rt, const char* key) {
     if (thrum_map_get(rt->modules, thrum_cstr(rt, key), &out)) return out;
     return thrum_nil();
 }
+
+/* ============================== Graph Export & Inspection ============================== */
+static int cmp_cell_id(const void* a, const void* b) {
+    const TCell* ca = *(const TCell* const*)a;
+    const TCell* cb = *(const TCell* const*)b;
+    return (ca->id > cb->id) - (ca->id < cb->id);
+}
+
+static void graph_collect(TCell* c, TCell*** cells, int* n, int* cap) {
+    if (!c || c->dead || cell_in_list(*cells, *n, c)) return;
+    if (*n >= *cap) {
+        *cap = *cap ? (*cap) * 2 : 32;
+        *cells = (TCell**)realloc(*cells, (size_t)(*cap) * sizeof(TCell*));
+    }
+    (*cells)[(*n)++] = c;
+    for (int i = 0; i < c->ndeps; i++) {
+        graph_collect(c->deps[i], cells, n, cap);
+    }
+}
+
+static void print_escaped(FILE* out, const char* s, char find_ch, const char* rep) {
+    for (const char* p = s; *p; p++) {
+        if (*p == find_ch) fputs(rep, out);
+        else fputc(*p, out);
+    }
+}
+
+void thrum_export_graph(TRuntime* rt, TEnv* env, const char* target_name, const char* fmt) {
+    TCell** cells = NULL;
+    int n = 0, cap = 0;
+    if (target_name && target_name[0]) {
+        TEnv* fe = NULL;
+        TEnvSlot* sl = NULL;
+        if (!env_find(env, target_name, &fe, &sl) ||
+            sl->val.kind != TV_OBJ || sl->val.as.obj->kind != OBJ_CELL) {
+            return;
+        }
+        graph_collect((TCell*)sl->val.as.obj, &cells, &n, &cap);
+    } else if (env) {
+        for (size_t i = 0; i < env->len; i++) {
+            TVal v = env->slots[i].val;
+            if (v.kind == TV_OBJ && v.as.obj && v.as.obj->kind == OBJ_CELL) {
+                graph_collect((TCell*)v.as.obj, &cells, &n, &cap);
+            }
+        }
+    }
+    FILE* out = stdout;
+    bool is_mermaid = fmt && strcmp(fmt, "mermaid") == 0;
+    if (is_mermaid) fputs("flowchart LR\n", out);
+    else fputs("digraph thrum {\n  rankdir=LR;\n", out);
+
+    for (int i = 0; i < n; i++) {
+        TCell* c = cells[i];
+        char* vs = thrum_vstr_alloc(rt, c->value, false);
+        if (is_mermaid) {
+            fprintf(out, "    c%d%s%s = ", c->id, c->ckind == CELL_SOURCE ? "([\"" : "[\"", c->name);
+            print_escaped(out, vs, '"', "'");
+            fputs(c->ckind == CELL_SOURCE ? "\"])\n" : "\"]\n", out);
+        } else {
+            fprintf(out, "  c%d [label=\"%s\\n", c->id, c->name);
+            print_escaped(out, vs, '"', "\\\"");
+            fprintf(out, "\", shape=%s];\n", c->ckind == CELL_SOURCE ? "ellipse" : "box");
+        }
+        free(vs);
+    }
+    for (int i = 0; i < n; i++) {
+        TCell* c = cells[i];
+        if (c->ndeps == 0) continue;
+        TCell** ds = (TCell**)malloc((size_t)c->ndeps * sizeof(TCell*));
+        memcpy(ds, c->deps, (size_t)c->ndeps * sizeof(TCell*));
+        qsort(ds, (size_t)c->ndeps, sizeof(TCell*), cmp_cell_id);
+        for (int j = 0; j < c->ndeps; j++) {
+            if (is_mermaid) fprintf(out, "    c%d --> c%d\n", ds[j]->id, c->id);
+            else fprintf(out, "  c%d -> c%d;\n", ds[j]->id, c->id);
+        }
+        free(ds);
+    }
+    if (!is_mermaid) fputs("}\n", out);
+    free(cells);
+}
+
+static int cmp_slot_name(const void* a, const void* b) {
+    const TEnvSlot* sa = *(const TEnvSlot* const*)a;
+    const TEnvSlot* sb = *(const TEnvSlot* const*)b;
+    return strcmp(sa->name, sb->name);
+}
+
+void thrum_dump_vars(TRuntime* rt, TEnv* env) {
+    if (!env || env->len == 0) return;
+    TEnvSlot** sorted = (TEnvSlot**)malloc(env->len * sizeof(TEnvSlot*));
+    size_t k = 0;
+    for (size_t i = 0; i < env->len; i++) {
+        if (env->slots[i].name && strncmp(env->slots[i].name, "_thrum_", 7) != 0) {
+            sorted[k++] = &env->slots[i];
+        }
+    }
+    qsort(sorted, k, sizeof(TEnvSlot*), cmp_slot_name);
+    FILE* out = rt->out ? rt->out : stdout;
+    for (size_t i = 0; i < k; i++) {
+        TEnvSlot* sl = sorted[i];
+        if (sl->val.kind == TV_OBJ && sl->val.as.obj && sl->val.as.obj->kind == OBJ_CELL) {
+            TCell* c = (TCell*)sl->val.as.obj;
+            char* vs = thrum_vstr_alloc(rt, c->value, true);
+            fprintf(out, "  %s %s = %s\n", c->ckind == CELL_SOURCE ? "var" : "let", sl->name, vs);
+            free(vs);
+        } else {
+            char* vs = thrum_vstr_alloc(rt, sl->val, true);
+            fprintf(out, "  pin %s = %s\n", sl->name, vs);
+            free(vs);
+        }
+    }
+    free(sorted);
+}

@@ -27,8 +27,8 @@ pin BUILTIN_DOC_EXPORTS = {
     regex: ["find_all", "match", "replace", "search", "split", "test"],
     units: ["c2k", "compatible", "convert", "define", "dim_of", "f2k", "k2c", "list", "qty"],
     stat: ["corr", "cov", "histogram", "iqr", "linfit", "mean", "median", "mode", "normalize", "quantile", "stdev", "variance", "weighted_mean", "zscore"],
-    text: ["chars", "contains", "count", "ends", "format", "index_of", "is_alpha", "is_digit", "join", "lines", "lower", "ltrim", "pad_left", "pad_right", "repeat", "replace", "rtrim", "split", "starts", "title", "trim", "upper", "words"],
-    math: ["acos", "acosh", "arange", "asin", "asinh", "atan", "atan2", "atanh", "clamp", "comb", "cos", "cosh", "cumsum", "deg2rad", "diff", "dot", "e", "exp", "expm1", "factorial", "factors", "gcd", "hypot", "inf", "is_prime", "isfinite", "isinf", "isnan", "lcm", "linspace", "ln", "log", "log10", "log1p", "log2", "nan", "norm", "perm", "phi", "pi", "rad2deg", "sin", "sinh", "tan", "tanh", "tau"],
+    text: ["chars", "chr", "contains", "count", "ends", "format", "from_hex", "index_of", "is_alpha", "is_digit", "join", "lines", "lower", "ltrim", "ord", "pad_left", "pad_right", "repeat", "replace", "rtrim", "split", "starts", "title", "to_bin", "to_hex", "trim", "upper", "words"],
+    math: ["acos", "acosh", "arange", "asin", "asinh", "atan", "atan2", "atanh", "band", "bnot", "bor", "bxor", "clamp", "comb", "cos", "cosh", "cumsum", "deg2rad", "diff", "dot", "e", "exp", "expm1", "factorial", "factors", "gcd", "hypot", "inf", "is_prime", "isfinite", "isinf", "isnan", "lcm", "linspace", "ln", "log", "log10", "log1p", "log2", "nan", "norm", "perm", "phi", "pi", "rad2deg", "shl", "shr", "sin", "sinh", "tan", "tanh", "tau"],
     "const": ["F", "G", "L_sun", "M_earth", "M_sun", "NA", "R", "R_earth", "Ry", "T_cmb", "alpha", "atm", "au", "c", "e", "eps0", "g0", "h", "hbar", "kB", "ly", "me", "mn", "mp", "mu0", "muB", "pc", "sigma", "u"],
 }
 
@@ -132,10 +132,13 @@ fn add_opt_backend(cmd_in, enabled, obj_nm, m_nm, stub_o_nm, stub_c_nm, fw, rt_d
             cmd = push(cmd, path.join(rt_dir, stub_c_nm))
     return cmd
 
-fn compile_to_bin(c_path, out_bin, home, fs_cap, proc_cap, needs_gui = false, needs_net = false):
+fn compile_to_bin(c_path, out_bin, home, fs_cap, proc_cap, needs_gui = false, needs_net = false, extra_cflags = []):
     let rt_dir = path.join(home, "runtime")
     let lib_a = path.join(rt_dir, "libthrumrt.a")
-    var cmd = ["cc", "-std=c11", "-O2", "-I" + rt_dir, c_path]
+    var cmd = ["cc", "-std=c11", "-O2", "-I" + rt_dir]
+    for cf in extra_cflags:
+        cmd = push(cmd, cf)
+    cmd = push(cmd, c_path)
     if fs_cap.is_file(lib_a):
         cmd = push(cmd, lib_a)
     else:
@@ -199,6 +202,8 @@ fn ann_str(ann) -> text:
         return ann.sym
     if ann.kind == "record":
         return ann.full
+    if ann.kind == "list_of" or ann.kind == "map_of" or ann.kind == "union":
+        return ann.disp
     return ""
 
 fn extract_file_docs(src, title) -> text:
@@ -272,7 +277,71 @@ fn collect_test_files(target_abs, fs_cap):
         walk(target_abs)
     return out
 
-fn run_compiled_src(src, af, disp_name, run_args, tmp_dir, home, fs_cap, proc_cap, clock_cap, strict = false):
+fn dump_ast_str(n, ind = 0) -> text:
+    var out = u.buf_new()
+
+    fn pad(k) -> text:
+        return " " * k
+
+    fn fmt_q_val(qv) -> text:
+        if qv.disp != nil:
+            let sc = qv.disp.sc
+            if sc != 0.0:
+                return "Q(" + str(qty(qv.v / sc, qv.disp.sym, qv.u / sc)) + ")"
+        return "Q(" + str(with_unc(qv.v, qv.u)) + ")"
+
+    fn fmt_py_str(s) -> text:
+        var esc = replace(s, "\\", "\\\\")
+        esc = replace(esc, "'", "\\'")
+        esc = replace(esc, "\n", "\\n")
+        esc = replace(esc, "\r", "\\r")
+        esc = replace(esc, "\t", "\\t")
+        return "'" + esc + "'"
+
+    fn walk(v, d):
+        let vt = type(v)
+        if v == nil:
+            out = u.buf_push(out, pad(d) + "None")
+            return
+        if vt == "bool":
+            if v:
+                out = u.buf_push(out, pad(d) + "True")
+            else:
+                out = u.buf_push(out, pad(d) + "False")
+            return
+        if vt == "text":
+            out = u.buf_push(out, pad(d) + fmt_py_str(slice(v, 0, min([118, len(v)]))))
+            return
+        if vt == "list":
+            for it in v:
+                walk(it, d)
+            return
+        if vt == "map" and "kind" in v:
+            out = u.buf_push(out, pad(d) + v.kind)
+            if v.kind == "q":
+                out = u.buf_push(out, pad(d + 2) + "value:")
+                if v.lkind == "nil":
+                    out = u.buf_push(out, pad(d + 4) + "None")
+                elif v.lkind == "bool":
+                    walk(v.val, d + 4)
+                elif v.lkind == "str":
+                    walk(v.val, d + 4)
+                else:
+                    out = u.buf_push(out, pad(d + 4) + fmt_q_val(v.val))
+                return
+            for kf in keys(v):
+                if kf == "kind" or kf == "site":
+                    continue
+                out = u.buf_push(out, pad(d + 2) + kf + ":")
+                walk(v[kf], d + 4)
+            return
+        let s = repr(v)
+        out = u.buf_push(out, pad(d) + slice(s, 0, min([120, len(s)])))
+
+    walk(n, ind)
+    return u.buf_join(out, "\n")
+
+fn run_compiled_src(src, af, disp_name, run_args, tmp_dir, home, fs_cap, proc_cap, clock_cap, strict = false, extra_cflags = []):
     let stem = ".thrumc_run_" + str(floor(bare(clock_cap.mono()) * 1000000))
     let tmp_c = path.join(tmp_dir, stem + ".c")
     let tmp_bin = path.join(tmp_dir, stem)
@@ -280,7 +349,7 @@ fn run_compiled_src(src, af, disp_name, run_args, tmp_dir, home, fs_cap, proc_ca
         let c_code = compile_src_to_c(src, af, disp_name, home, fs_cap, strict)
         let dc = detect_caps(c_code)
         fs_cap.write(tmp_c, c_code)
-        let cr = compile_to_bin(tmp_c, tmp_bin, home, fs_cap, proc_cap, dc.gui, dc.net)
+        let cr = compile_to_bin(tmp_c, tmp_bin, home, fs_cap, proc_cap, dc.gui, dc.net, extra_cflags)
         if fs_cap.exists(tmp_c):
             fs_cap.remove(tmp_c)
         if cr.code != 0:
@@ -307,11 +376,119 @@ fn run_compiled_src(src, af, disp_name, run_args, tmp_dir, home, fs_cap, proc_ca
             em = slice(em, 15)
         return {ok: false, code: 1, out: "", err: em}
 
+fn indent_block_lines(src_s) -> text:
+    var out = []
+    for ln in split(replace(src_s, "\r\n", "\n"), "\n"):
+        if trim(ln) == "":
+            out = push(out, "")
+        else:
+            out = push(out, "    " + ln)
+    return join("\n", out)
+
+fn run_repl(home, cwd, fs_cap, io_cap, env_cap, proc_cap, clock_cap):
+    io_cap.say("Thrum " + VERSION + " — live relations, quantities, provenance. Type :help for commands, Ctrl-D to exit.")
+    var tmp_dir = env_cap.get("TMPDIR")
+    if tmp_dir == "":
+        tmp_dir = cwd
+    var decls = []
+    while true:
+        let line = io_cap.ask(">>> ")
+        if line == "" and io_cap.eof():
+            io_cap.say("")
+            return
+        var src_line = line
+        let trimmed = trim(line)
+        if trimmed == "":
+            continue
+        if starts(trimmed, ":"):
+            let parts = text.words(trimmed)
+            let cmd = parts[0]
+            if cmd == ":q" or cmd == ":quit" or cmd == ":exit":
+                return
+            if cmd == ":help":
+                io_cap.say("  :vars         list current top-level bindings")
+                io_cap.say("  :why <name>   print dependency tree for <name>")
+                io_cap.say("  :budget <n>   print uncertainty budget for <n>")
+                io_cap.say("  :units [q]    search unit registry")
+                io_cap.say("  :reset        clear all state")
+                io_cap.say("  :quit         exit REPL")
+                continue
+            if cmd == ":reset":
+                decls = []
+                io_cap.say("(state cleared)")
+                continue
+            if cmd == ":units":
+                var q = nil
+                if len(parts) > 1:
+                    q = parts[1]
+                for sym in sort(uniq(units.list())):
+                    if q == nil or (q in sym):
+                        let v = qty(1, sym)
+                        io_cap.say("  " + text.pad_right(sym, 12) + " " + text.pad_right(dim(v), 22) + " scale=" + fmt(bare(v)))
+                continue
+            if cmd == ":vars":
+                let prog_s = join("\n", decls)
+                if trim(prog_s) != "":
+                    let r = run_compiled_src(prog_s, path.join(cwd, "<repl>"), "<repl>", [], tmp_dir, home, fs_cap, proc_cap, clock_cap, false, ["-DTHRUM_REPL_VARS=1"])
+                    if r.out != "":
+                        io_cap.print(r.out)
+                    emit_trimmed_err(io_cap, r.err)
+                continue
+            if (cmd == ":why" or cmd == ":budget") and len(parts) == 2:
+                src_line = slice(cmd, 1) + " " + parts[1]
+            else:
+                io_cap.say("unknown command " + repr(cmd) + " (try :help)")
+                continue
+        if ends(rstrip_spaces(src_line), ":"):
+            var blk = [src_line]
+            while true:
+                let more = io_cap.ask("... ")
+                if trim(more) == "" or (more == "" and io_cap.eof()):
+                    break
+                blk = push(blk, more)
+            src_line = join("\n", blk)
+
+        var parsed = nil
+        try:
+            parsed = p.parse(src_line, "<repl>")
+        catch e:
+            report_err(io_cap, e)
+            continue
+        if len(parsed.body) == 0:
+            continue
+
+        let prev_s = join("\n", decls)
+        let sep = "__THRUM_REPL_MARK__"
+        let is_expr_only = len(parsed.body) == 1 and parsed.body[0].kind == "exprstmt"
+        var full_src = prev_s
+        if full_src != "":
+            full_src = full_src + "\n"
+        var commit = false
+        if is_expr_only:
+            full_src = full_src + "with io:\n    io.say(\"" + sep + "\")\n    let _repl_val = (" + trim(src_line) + ")\n    if not isnil(_repl_val):\n        io.say(repr(_repl_val))\n"
+        else:
+            let sk = parsed.body[0].kind
+            if len(parsed.body) == 1 and (sk == "decl" or sk == "fndecl" or sk == "record" or sk == "assign" or sk == "use" or sk == "settle" or sk == "live" or sk == "on"):
+                commit = true
+            full_src = full_src + "with io:\n    io.say(\"" + sep + "\")\n" + indent_block_lines(src_line) + "\n"
+
+        let res = run_compiled_src(full_src, path.join(cwd, "<repl>"), "<repl>", [], tmp_dir, home, fs_cap, proc_cap, clock_cap, false)
+        if not res.ok:
+            emit_trimmed_err(io_cap, res.err)
+            continue
+        if commit:
+            decls = push(decls, src_line)
+        let mk_idx = text.index_of(res.out, sep + "\n")
+        if mk_idx >= 0:
+            let tail = slice(res.out, mk_idx + len(sep) + 1)
+            if tail != "":
+                io_cap.print(tail)
+
 fn main():
     with io, args, env, fs("/"), proc, clock:
         let av = args.all()
         if len(av) == 0:
-            io.say("usage: thrumc <build|emit-c|run|check|fmt|doc|units|test|version> [file] [options]")
+            io.say("usage: thrumc <build|emit-c|run|check|ast|graph|fmt|doc|units|test|repl|version> [file] [options]")
             proc.exit(0)
         let sub = av[0]
         if sub == "version":
@@ -321,6 +498,10 @@ fn main():
         let cwd = proc.cwd()
         let home = find_home(proc.exe(), cwd, fs, env)
         let rest = av[1:]
+
+        if sub == "repl":
+            run_repl(home, cwd, fs, io, env, proc, clock)
+            proc.exit(0)
 
         if sub == "units":
             var q = nil
@@ -531,16 +712,79 @@ fn main():
                 report_err(io, e)
                 proc.exit(1)
 
+        if sub == "ast":
+            if len(rest) < 1:
+                io.err("usage: thrumc ast <file>")
+                proc.exit(1)
+            let f = rest[0]
+            let af = abs_path(f, cwd)
+            try:
+                if not fs.is_file(af):
+                    io.err("file not found: " + f)
+                    proc.exit(1)
+                let src = fs.read(af)
+                let parsed = p.parse(src, f)
+                for st in parsed.body:
+                    let s = dump_ast_str(st, 0)
+                    if s != "":
+                        io.say(s)
+                proc.exit(0)
+            catch e:
+                report_err(io, e)
+                proc.exit(1)
+
+        if sub == "graph":
+            if len(rest) < 1:
+                io.err("usage: thrumc graph <file> [symbol] [--format dot|mermaid]")
+                proc.exit(1)
+            let f = rest[0]
+            var g_sym = ""
+            var g_fmt = "dot"
+            var i = 1
+            while i < len(rest):
+                if rest[i] == "--format" and i + 1 < len(rest):
+                    g_fmt = rest[i + 1]
+                    i += 2
+                else:
+                    if g_sym == "":
+                        g_sym = rest[i]
+                    i += 1
+            if g_fmt != "dot" and g_fmt != "mermaid":
+                io.err("thrumc graph: --format must be 'dot' or 'mermaid'")
+                proc.exit(1)
+            var tmp_dir = env.get("TMPDIR")
+            if tmp_dir == "":
+                tmp_dir = path.dirname(abs_path(f, cwd))
+                if tmp_dir == "":
+                    tmp_dir = cwd
+            let af = abs_path(f, cwd)
+            if not fs.is_file(af):
+                io.err("thrumc: error: file not found: " + f)
+                proc.exit(1)
+            let src = fs.read(af)
+            let cfl = ["-DTHRUM_GRAPH_FMT=" + cg.c_str_lit(g_fmt), "-DTHRUM_GRAPH_SYM=" + cg.c_str_lit(g_sym)]
+            let res = run_compiled_src(src, af, f, [], tmp_dir, home, fs, proc, clock, false, cfl)
+            if res.out != "":
+                io.print(res.out)
+            emit_trimmed_err(io, res.err)
+            proc.exit(res.code)
+
         if sub == "run":
             if len(rest) < 1:
                 io.err("usage: thrumc run <file> [--strict] [-- args...]")
                 proc.exit(1)
             let f = rest[0]
             var strict = false
-            var run_args = rest[1:]
-            if len(run_args) > 0 and run_args[0] == "--strict":
-                strict = true
-                run_args = run_args[1:]
+            var run_args = []
+            var seen_dash = false
+            for a in rest[1:]:
+                if a == "--" and not seen_dash:
+                    seen_dash = true
+                    run_args = push(run_args, a)
+                elif not seen_dash and a == "--strict":
+                    strict = true
+                else:
+                    run_args = push(run_args, a)
             var tmp_dir = env.get("TMPDIR")
             if tmp_dir == "":
                 tmp_dir = path.dirname(abs_path(f, cwd))

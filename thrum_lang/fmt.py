@@ -87,10 +87,10 @@ def _ann_str(ann):
         return ""
     if ann[0] == "kind":
         return ann[1]
-    if ann[0] == "dim":
+    if ann[0] in ("dim", "record", "list_of"):
         return ann[2]
-    if ann[0] == "record":
-        return ann[2]
+    if ann[0] in ("map_of", "union"):
+        return ann[-1]
     return ""
 
 

@@ -328,9 +328,32 @@ class P:
         self.take("OP", ")")
         return ps
 
-    def typeann(self):
+    def _ann_disp(self, a):
+        if a[0] == "kind":
+            return a[1]
+        if a[0] in ("dim", "record", "list_of"):
+            return a[2]
+        if a[0] in ("map_of", "union"):
+            return a[-1]
+        return "any"
+
+    def _type_base(self):
         t = self.peek()
-        if t.kind == "NAME" and t.val in KINDS:
+        if t.kind == "NAME" and t.val in ("list", "map"):
+            nm = self.take().val
+            if self.op("["):
+                self.take()
+                if nm == "list":
+                    el = self.typeann()
+                    self.take("OP", "]")
+                    return ("list_of", el, "list[%s]" % self._ann_disp(el))
+                kt = self.typeann()
+                self.take("OP", ",")
+                vt = self.typeann()
+                self.take("OP", "]")
+                return ("map_of", kt, vt, "map[%s, %s]" % (self._ann_disp(kt), self._ann_disp(vt)))
+            return ("kind", nm)
+        if (t.kind == "NAME" and t.val in KINDS) or (t.kind == "KW" and t.val == "fn"):
             self.take()
             return ("kind", t.val)
         if t.kind == "KW" and t.val == "nil":
@@ -349,6 +372,29 @@ class P:
                 parts.append(self.take("NAME").val)
             return ("record", parts[-1], ".".join(parts))
         raise ThrumError("expected a type or unit here", site_of(t))
+
+    def _type_atom(self):
+        ty = self._type_base()
+        if self.op("?"):
+            self.take()
+            return ("union", [ty, ("kind", "nil")], self._ann_disp(ty) + "?")
+        return ty
+
+    def typeann(self):
+        first = self._type_atom()
+        if not self.op("|"):
+            return first
+        alts = list(first[1]) if first[0] == "union" else [first]
+        labels = [self._ann_disp(first)]
+        while self.op("|"):
+            self.take()
+            nxt = self._type_atom()
+            labels.append(self._ann_disp(nxt))
+            if nxt[0] == "union":
+                alts.extend(nxt[1])
+            else:
+                alts.append(nxt)
+        return ("union", alts, " | ".join(labels))
 
     def take_unit(self):
         t = self.peek()

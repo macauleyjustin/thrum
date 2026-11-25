@@ -893,11 +893,17 @@ static TVal io_table(TRuntime* rt, void* ctx, int argc, TVal* argv, int line, in
     return thrum_nil();
 }
 
+static TVal io_eof(TRuntime* rt, void* ctx, int argc, TVal* argv, int line, int col) {
+    (void)rt; (void)ctx; (void)argc; (void)argv; (void)line; (void)col;
+    return thrum_bool(feof(stdin) != 0);
+}
+
 static TCap* mk_cap_io(TRuntime* rt) {
     TCap* c = mk_cap(rt, "io", NULL, NULL, NULL);
     cap_add(rt, c, "say", io_say, 0, -1);
     cap_add(rt, c, "print", io_print, 0, -1);
     cap_add(rt, c, "ask", io_ask, 0, 1);
+    cap_add(rt, c, "eof", io_eof, 0, 0);
     cap_add(rt, c, "warn", io_warn, 0, -1);
     cap_add(rt, c, "err", io_err, 0, -1);
     cap_add(rt, c, "table", io_table, 1, 2);

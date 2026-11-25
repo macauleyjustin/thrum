@@ -103,7 +103,7 @@ record Vec2:
 - Map keys can be `text`, `num`, `bool`, or `nil` with uniform lookup across indexing, literals, and `in`.
 
 ### 5.3 Types, Contracts, and Static Checker (`thrum check`)
-- Parameter, field, and return annotations accept shape kinds (`num`, `text`, `bool`, `list`, `map`, `fn`, `any`, `module`, `cap`, `record`, `nil`), dimensions (`kg`, `m/s^2`, `J`, `1`), or record names (`Vec2`, `vec.Vec2`).
+- Parameter, field, and return annotations accept shape kinds (`num`, `text`, `bool`, `list`, `map`, `fn`, `any`, `module`, `cap`, `record`, `nil`), dimensions (`kg`, `m/s^2`, `J`, `1`), record names (`Vec2`, `vec.Vec2`), parameterized containers (`list[T]`, `map[K, V]`), and union/optional types (`T | U`, `T?`).
 - `requires` / `ensures` contracts (with `result` bound in `ensures`) are enforced at runtime on named and anonymous functions.
 - `thrum check` statically verifies syntax, name/capability/module resolution, `settle`/`init` structure, assignment immutability, and conservative dimension/type inference prior to execution.
 
@@ -113,17 +113,20 @@ record Vec2:
 
 - **Provenance:** `why NAME`, `budget NAME`, `whatif var = expr: ...`
 - **Capabilities:**
-  - `io`: `say`, `print`, `ask`, `warn`, `table`
+  - `io`: `say`, `print`, `ask`, `eof`, `warn`, `err`, `table`
   - `clock`: `now`, `mono`, `sleep`
   - `rand([seed])`: `float`, `int`, `pick`, `shuffle`, `sample`, `gauss`
   - `fs([root])`: `read`, `read_lines`, `write`, `write_lines`, `append`, `exists`, `is_file`, `is_dir`, `list`, `mkdir`, `remove`
   - `env`: `get`, `has`, `keys`
   - `args`: `all`, `get`, `len`
   - `tty`: `is_tty`, `enter_raw`, `exit_raw`, `hide_cursor`, `show_cursor`, `clear`, `write`, `size`, `poll_key` (automatically restores raw mode and cursor visibility when exiting `with tty:`)
+  - `proc`: `run`, `exe`, `cwd`, `exit`
+  - `gui`: `open`, `is_open`, `close`, `size`, `poll`, `wait`, `begin`, `clear`, `rect`, `round_rect`, `stroke_rect`, `circle`, `line`, `text`, `clip`, `unclip`, `measure`, `clipboard`, `set_clipboard`, `commit`, `screenshot`
+  - `net`: `get`, `post`
 - **Built-in Standard Modules (`use <name>`):**
   `math`, `const`, `stat`, `units`, `text`, `regex`, `json`, `csv`, `time`, `path`, `list`, `map`, `test`.
 - **Standard Library (`use std.<name>`):**
-  `std.vec`, `std.physics`, `std.signal`, `std.finance`, `std.matrix`.
+  `std.vec`, `std.physics`, `std.signal`, `std.finance`, `std.matrix`, `std.algo`, `std.num`, `std.geom`, `std.prob`, `std.complex`.
 
 ---
 
